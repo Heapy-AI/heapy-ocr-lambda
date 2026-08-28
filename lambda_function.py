@@ -11,43 +11,50 @@ import json
 import logging
 from typing import Any
 
+from heapy_ocr.catalog import MASTER_CHECKUP_ITEMS
 from heapy_ocr.config import Settings
 from heapy_ocr.exceptions import OcrError
 from heapy_ocr.gemini import GeminiCheckupParser
+from heapy_ocr.google_vision import GoogleVisionAnalyzer
+from heapy_ocr.hybrid_parser import HybridCheckupParser
+from heapy_ocr.medication import GeminiMedicationParser
+from heapy_ocr.medication_service import MedicationOcrService
 from heapy_ocr.models import (
     OCR_TYPE_HEALTH_CHECKUP,
-    OPERATION_CONFIRM_AND_SAVE,
+    OCR_TYPE_MEDICATION,
     OPERATION_EXTRACT,
-    ParsedCheckupItem,
+    OPERATION_OCR_PAGE,
+    OPERATION_PARSE,
 )
+from heapy_ocr.ocr import OcrDocument
+from heapy_ocr.rule_parser import RuleBasedCheckupParser
 from heapy_ocr.service import HeapyOcrService
-from heapy_ocr.supabase import SupabaseGateway
-from heapy_ocr.textract import TextractAnalyzer
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 _service: HeapyOcrService | None = None
+_medication_service: MedicationOcrService | None = None
 
 
 def _build_service() -> HeapyOcrService:
-    """환경변수와 AWS SDK 클라이언트로 서비스를 생성한다."""
-    import boto3
-
+    """환경변수와 외부 서비스 어댑터로 OCR 서비스를 생성한다."""
     settings = Settings.from_env()
     return HeapyOcrService(
-        textract=TextractAnalyzer(boto3.client("textract")),
-        parser=GeminiCheckupParser(
-            settings.gemini_api_key,
-            settings.gemini_model,
+        ocr_analyzer=GoogleVisionAnalyzer(
+            settings.google_vision_api_key,
             settings.external_timeout_seconds,
         ),
-        supabase=SupabaseGateway(
-            settings.supabase_url,
-            settings.supabase_publishable_key,
-            settings.external_timeout_seconds,
+        parser=HybridCheckupParser(
+            primary=GeminiCheckupParser(
+                settings.gemini_api_key,
+                settings.gemini_model,
+                settings.gemini_timeout_seconds,
+            ),
+            fallback=RuleBasedCheckupParser(MASTER_CHECKUP_ITEMS),
         ),
         max_image_bytes=settings.max_image_bytes,
+        parser_chunk_page_count=settings.gemini_pages_per_request,
     )
 
 
@@ -58,30 +65,73 @@ def _get_service() -> HeapyOcrService:
     return _service
 
 
+def _build_medication_service() -> MedicationOcrService:
+    """환경변수와 외부 서비스 어댑터로 약봉투 OCR 서비스를 생성한다."""
+
+    settings = Settings.from_env()
+    return MedicationOcrService(
+        ocr_analyzer=GoogleVisionAnalyzer(
+            settings.google_vision_api_key,
+            settings.external_timeout_seconds,
+        ),
+        parser=GeminiMedicationParser(
+            settings.gemini_api_key,
+            settings.gemini_model,
+            settings.gemini_timeout_seconds,
+        ),
+        max_image_bytes=settings.max_image_bytes,
+    )
+
+
+def _get_medication_service() -> MedicationOcrService:
+    global _medication_service
+    if _medication_service is None:
+        _medication_service = _build_medication_service()
+    return _medication_service
+
+
+def _service_for_type(
+    ocr_type: str,
+) -> HeapyOcrService | MedicationOcrService:
+    if ocr_type == OCR_TYPE_HEALTH_CHECKUP:
+        return _get_service()
+    if ocr_type == OCR_TYPE_MEDICATION:
+        return _get_medication_service()
+    raise OcrError("HEALTH_CHECKUP 또는 MEDICATION OCR만 지원합니다.")
+
+
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """OCR 추출 또는 확인된 건강검진 결과 저장 요청을 처리한다."""
+    """건강검진 또는 약봉투 OCR 추출 요청을 처리한다."""
     del context
     try:
         settings = Settings.from_env()
         headers = _normalized_headers(event.get("headers"))
         _verify_internal_secret(headers, settings.internal_secret_key)
-        access_token = _bearer_token(headers.get("authorization", ""))
         payload = _parse_body(event)
 
         ocr_type = str(payload.get("ocr_type", "")).strip().upper()
-        if ocr_type != OCR_TYPE_HEALTH_CHECKUP:
-            raise OcrError("현재 HEALTH_CHECKUP OCR만 지원합니다.")
+        service = _service_for_type(ocr_type)
 
         operation = str(payload.get("operation", OPERATION_EXTRACT)).strip().upper()
         if operation == OPERATION_EXTRACT:
-            result = _extract(payload, access_token, settings.max_image_bytes)
-            logger.info("건강검진 OCR 추출 완료: request_id=%s", result["request_id"])
+            result = _extract(payload, settings.max_image_bytes, service)
+            logger.info("OCR 추출 완료: type=%s request_id=%s", ocr_type, result["request_id"])
             return _response(200, {"is_success": True, "result": result})
-        if operation == OPERATION_CONFIRM_AND_SAVE:
-            result = _confirm_and_save(payload, access_token)
-            logger.info("건강검진 OCR 저장 완료: record_id=%s", result["record_id"])
+        if operation == OPERATION_OCR_PAGE:
+            result = _ocr_page(payload, settings.max_image_bytes, service)
             return _response(200, {"is_success": True, "result": result})
-        raise OcrError("지원하지 않는 operation입니다.")
+        if operation == OPERATION_PARSE:
+            max_page_count = getattr(
+                service,
+                "MAX_PAGE_COUNT",
+                HeapyOcrService.MAX_PAGE_COUNT,
+            )
+            result = service.extract_documents(
+                _decode_ocr_documents(payload, max_page_count)
+            ).to_dict()
+            logger.info("OCR 파싱 완료: type=%s request_id=%s", ocr_type, result["request_id"])
+            return _response(200, {"is_success": True, "result": result})
+        raise OcrError("EXTRACT, OCR_PAGE 또는 PARSE 작업만 지원합니다.")
     except OcrError as exc:
         logger.warning("OCR 요청 처리 실패: %s", exc.message)
         return _response(
@@ -102,10 +152,88 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
 def _extract(
     payload: dict[str, Any],
-    access_token: str,
     max_image_bytes: int,
+    service: HeapyOcrService | MedicationOcrService,
 ) -> dict[str, Any]:
-    image_base64 = payload.get("image_base64")
+    page_images = payload.get("page_images_base64")
+    if page_images is not None:
+        if not isinstance(page_images, list) or not page_images:
+            raise OcrError("page_images_base64는 한 개 이상의 이미지 배열이어야 합니다.")
+        max_page_count = getattr(
+            service,
+            "MAX_PAGE_COUNT",
+            HeapyOcrService.MAX_PAGE_COUNT,
+        )
+        if len(page_images) > max_page_count:
+            raise OcrError(
+                f"이미지는 최대 {max_page_count}장까지 지원합니다."
+            )
+        image_pages = tuple(
+            _decode_image(image_base64, max_image_bytes)
+            for image_base64 in page_images
+        )
+        return service.extract_pages(image_pages).to_dict()
+
+    image_bytes = _decode_image(payload.get("image_base64"), max_image_bytes)
+    return service.extract(image_bytes).to_dict()
+
+
+def _ocr_page(
+    payload: dict[str, Any],
+    max_image_bytes: int,
+    service: HeapyOcrService | MedicationOcrService,
+) -> dict[str, Any]:
+    """한 페이지 이미지만 OCR하여 Lambda 요청 크기를 일정하게 유지한다."""
+
+    image_bytes = _decode_image(payload.get("image_base64"), max_image_bytes)
+    document = service.ocr_analyzer.analyze(image_bytes)
+    return {
+        "text": document.text,
+        "lines": list(document.lines),
+        "average_confidence": document.average_confidence,
+    }
+
+
+def _decode_ocr_documents(
+    payload: dict[str, Any],
+    max_page_count: int = HeapyOcrService.MAX_PAGE_COUNT,
+) -> tuple[OcrDocument, ...]:
+    values = payload.get("ocr_pages")
+    if not isinstance(values, list) or not values:
+        raise OcrError("ocr_pages는 한 개 이상의 OCR 페이지 배열이어야 합니다.")
+    if len(values) > max_page_count:
+        raise OcrError(
+            f"OCR 이미지는 최대 {max_page_count}장까지 지원합니다."
+        )
+
+    documents: list[OcrDocument] = []
+    total_text_length = 0
+    for value in values:
+        if not isinstance(value, dict):
+            raise OcrError("ocr_pages의 각 항목은 JSON 객체여야 합니다.")
+        text = value.get("text")
+        lines = value.get("lines")
+        confidence = value.get("average_confidence")
+        if not isinstance(text, str) or not isinstance(lines, list):
+            raise OcrError("OCR 페이지의 text와 lines 형식이 올바르지 않습니다.")
+        if not all(isinstance(line, str) for line in lines):
+            raise OcrError("OCR 페이지의 lines에는 문자열만 포함할 수 있습니다.")
+        if not isinstance(confidence, int | float) or not 0 <= confidence <= 1:
+            raise OcrError("OCR 페이지의 average_confidence는 0~1이어야 합니다.")
+        total_text_length += len(text) + sum(len(line) for line in lines)
+        if total_text_length > 1_000_000:
+            raise OcrError("OCR 텍스트 전체 크기가 허용 범위를 초과했습니다.")
+        documents.append(
+            OcrDocument(
+                text=text,
+                lines=tuple(lines),
+                average_confidence=float(confidence),
+            )
+        )
+    return tuple(documents)
+
+
+def _decode_image(image_base64: Any, max_image_bytes: int) -> bytes:
     if not isinstance(image_base64, str) or not image_base64.strip():
         raise OcrError("image_base64가 필요합니다.")
     try:
@@ -115,58 +243,8 @@ def _extract(
     if len(image_bytes) > max_image_bytes:
         raise OcrError("건강검진 결과지 이미지 크기가 허용 범위를 초과했습니다.")
     if not _supported_document(image_bytes):
-        raise OcrError("JPEG, PNG, PDF 또는 TIFF 파일만 지원합니다.")
-    return _get_service().extract(image_bytes, access_token).to_dict()
-
-
-def _confirm_and_save(
-    payload: dict[str, Any],
-    access_token: str,
-) -> dict[str, Any]:
-    if payload.get("confirmed") is not True:
-        raise OcrError("사용자 확인을 완료한 결과만 저장할 수 있습니다.")
-    measured_at = payload.get("measured_at")
-    raw_items = payload.get("items")
-    if not isinstance(measured_at, str):
-        raise OcrError("measured_at이 필요합니다.")
-    if not isinstance(raw_items, list):
-        raise OcrError("items는 배열이어야 합니다.")
-    items = tuple(_confirmed_item(item) for item in raw_items)
-    record_id = _get_service().confirm_and_save(
-        access_token,
-        measured_at,
-        items,
-    )
-    return {
-        "record_id": record_id,
-        "measured_at": measured_at,
-        "saved_item_count": len(items),
-    }
-
-
-def _confirmed_item(payload: Any) -> ParsedCheckupItem:
-    if not isinstance(payload, dict):
-        raise OcrError("검사항목 형식이 올바르지 않습니다.")
-    raw_name = str(payload.get("raw_name") or payload.get("item_name") or "").strip()
-    item_code = str(payload.get("item_code") or "").strip().upper()
-    item_name = str(payload.get("item_name") or "").strip()
-    raw_value = str(payload.get("raw_value") or payload.get("value") or "").strip()
-    value = str(payload.get("value") or "").strip()
-    unit = _optional_text(payload.get("unit"))
-    printed_status = _optional_text(
-        payload.get("printed_status", payload.get("status"))
-    )
-    return ParsedCheckupItem(
-        raw_name=raw_name,
-        item_code=item_code or None,
-        item_name=item_name or None,
-        raw_value=raw_value,
-        value=value,
-        unit=unit,
-        printed_status=printed_status,
-        confidence=float(payload.get("confidence", 1.0)),
-        needs_review=False,
-    )
+        raise OcrError("JPEG 또는 PNG 파일만 지원합니다.")
+    return image_bytes
 
 
 def _parse_body(event: dict[str, Any]) -> dict[str, Any]:
@@ -200,30 +278,11 @@ def _verify_internal_secret(headers: dict[str, str], expected: str) -> None:
         raise OcrError("내부 서비스 인증에 실패했습니다.", 401)
 
 
-def _bearer_token(authorization: str) -> str:
-    prefix = "Bearer "
-    if not authorization.startswith(prefix):
-        raise OcrError("사용자 인증 토큰이 필요합니다.", 401)
-    token = authorization[len(prefix) :].strip()
-    if not token:
-        raise OcrError("사용자 인증 토큰이 필요합니다.", 401)
-    return token
-
-
 def _supported_document(data: bytes) -> bool:
     return (
         data.startswith(b"\xff\xd8\xff")
         or data.startswith(b"\x89PNG\r\n\x1a\n")
-        or data.startswith(b"%PDF-")
-        or data.startswith((b"II*\x00", b"MM\x00*"))
     )
-
-
-def _optional_text(value: Any) -> str | None:
-    if value is None:
-        return None
-    stripped = str(value).strip()
-    return stripped or None
 
 
 def _response(status_code: int, body: dict[str, Any]) -> dict[str, Any]:

@@ -1,115 +1,91 @@
 # HEAPY OCR Lambda
 
-건강검진 결과지 사진에서 텍스트와 검사 결과를 추출하고, 사용자가 확인한 결과를
-Supabase의 `health_checkup_records`, `health_checkup_results`에 저장하는 독립 Lambda
-서비스입니다.
+건강검진 결과지의 한글·영문 텍스트를 인식하고 정해진 결과 구조로 변환하는 OCR 전용
+프로젝트입니다.
 
 - 작성자: 김진우
-- 지원 OCR 유형: `HEALTH_CHECKUP`
-- 실행 방식: AWS Lambda Function URL
-- OCR: Amazon Textract `AnalyzeDocument(TABLES, FORMS)`
-- 구조화 파싱: Gemini JSON 구조화 출력
-- 저장: 사용자 JWT + Supabase RLS + 원자적 RPC
+- 지원 유형: `HEALTH_CHECKUP`, `MEDICATION`
+- OCR: Google Cloud Vision `DOCUMENT_TEXT_DETECTION`
+- 구조화: Gemini 구조화 파서 우선, 내부 규칙 파서 fallback
+- 항목 매칭: 내부 건강검진 마스터 158개
+- DB 연결 및 저장: 지원하지 않음
+- Supabase 사용자 토큰: 필요 없음
 
 ## 처리 흐름
 
 ```text
-HEAPY 백엔드
-  └─ EXTRACT 요청
-       ├─ 내부 시크릿과 사용자 JWT 검증
-       ├─ Textract 표·양식 OCR
-       ├─ Gemini 건강검진 항목 구조화
-       ├─ master_checkup_item 코드 매핑
-       └─ 사용자 확인용 초안 반환
-
-사용자 확인
-  └─ CONFIRM_AND_SAVE 요청
-       ├─ 날짜·항목 코드·결과값 검증
-       └─ Supabase RPC로 검진 회차와 결과를 한 트랜잭션에 저장
+JPG·PNG 또는 PDF
+  → PDF 페이지 이미지 변환
+  → Google Vision 한글 OCR
+  → OCR 텍스트를 기본 3페이지씩 Gemini 구조화
+  → 실패한 페이지 묶음만 내부 규칙 파서 fallback
+  → 내부 건강검진 마스터 코드 매칭
+  → JSON 결과 반환
 ```
 
-OCR 결과는 자동 저장하지 않습니다. 숫자·항목·검진일을 사용자가 확인한 뒤
-`confirmed=true` 요청을 보내야 저장됩니다.
-
-## 프로젝트 구조
-
-```text
-heapy-ocr-lambda/
-├── lambda_function.py
-├── heapy_ocr/
-│   ├── config.py
-│   ├── gemini.py
-│   ├── matcher.py
-│   ├── models.py
-│   ├── service.py
-│   ├── supabase.py
-│   └── textract.py
-├── database/
-│   └── create_health_checkup_from_ocr.sql
-├── docs/
-│   ├── api_spec.md
-│   ├── architecture.md
-│   └── db_design.md
-└── tests/
-```
+이미지, PDF, OCR 결과는 DB나 파일에 저장하지 않습니다.
 
 ## 환경변수
 
-`.env.example`을 기준으로 Lambda 환경변수를 설정합니다.
-
 | 환경변수 | 설명 |
 |---|---|
-| `INTERNAL_SECRET_KEY` | HEAPY 백엔드와 Lambda가 공유하는 내부 인증 키 |
-| `GEMINI_API_KEY` | Gemini 구조화 파싱 API 키 |
-| `GEMINI_MODEL` | 기본값 `gemini-2.5-flash` |
-| `SUPABASE_URL` | HEAPY Supabase 프로젝트 URL |
-| `SUPABASE_PUBLISHABLE_KEY` | 공개 가능한 publishable key. 사용자 JWT와 함께 사용 |
-| `MAX_IMAGE_BYTES` | 기본 5 MiB |
-| `EXTERNAL_TIMEOUT_SECONDS` | 외부 API 호출 제한 시간, 기본 20초 |
+| `INTERNAL_SECRET_KEY` | Lambda 호출 시 HEAPY 백엔드와 공유하는 내부 키 |
+| `GOOGLE_VISION_API_KEY` | Google Cloud Vision API 키 |
+| `GEMINI_API_KEY` | Gemini API 키, 없거나 호출 실패 시 규칙 파서로 자동 전환 |
+| `GEMINI_MODEL` | Gemini 모델, 기본 `gemini-2.5-flash` |
+| `GEMINI_PAGES_PER_REQUEST` | Gemini 요청당 페이지 수, 기본 3, 허용 1~5 |
+| `MAX_IMAGE_BYTES` | 이미지 한 장의 최대 크기, 기본 5 MiB |
+| `EXTERNAL_TIMEOUT_SECONDS` | 외부 API 제한 시간, 기본 20초 |
+| `GEMINI_TIMEOUT_SECONDS` | Gemini 제한 시간, 기본 60초 |
 
-`service_role` 또는 secret key는 사용하지 않습니다.
+Supabase URL, publishable key, access token은 설정하지 않습니다.
 
-## 사전 DB 설정
+## 로컬 데모 실행
 
-`database/create_health_checkup_from_ocr.sql`을 HEAPY Supabase 프로젝트에 적용해야 합니다.
-이 SQL은 사용자 본인 행만 삽입할 수 있는 RLS 정책과 저장 RPC를 추가합니다.
+프로젝트 루트의 `.env`에 키를 입력합니다.
+
+```env
+GOOGLE_VISION_API_KEY=새로_발급한_Vision_키
+GEMINI_API_KEY=새로_발급한_Gemini_키
+```
+
+`.env`는 Git에 포함되지 않으며 로컬 데모 시작 시 자동으로 읽습니다. 이미 설정된 터미널
+환경변수가 있으면 터미널 값을 우선합니다.
+
+```powershell
+.\.venv\Scripts\python.exe demo_server.py
+```
+
+약봉투를 시험하려면 브라우저에서 `약봉투 · 복약안내문`을 선택하고 JPG 또는 PNG 사진을
+올린 뒤 `전체 로직 실행`을 누릅니다. 약명, 함량, 1회량, 1일 횟수, 투약일수와 복용법이
+표와 JSON으로 표시됩니다.
+
+브라우저에서 `http://127.0.0.1:8080`을 엽니다. JPG, PNG, PDF와 암호화된 PDF를
+지원하며 PDF는 브라우저 메모리에서 최대 20페이지의 이미지로 변환합니다. 페이지 이미지는
+한 장씩 Vision OCR로 전송하고, OCR 텍스트는 기본 3페이지 단위로 나눠 Gemini에
+전송합니다. 특정 묶음의 Gemini 호출만 실패하면 해당 묶음에만 규칙 fallback을 적용합니다.
+
+- `원문 OCR 실행`: Google Vision 결과만 확인
+- `전체 로직 실행`: Vision OCR, Gemini 우선 구조화, 규칙 fallback, 내부 코드 매칭까지 확인
+
+두 기능 모두 사용자 토큰이나 DB 연결을 사용하지 않습니다.
+
+약봉투는 양식별 차이가 커서 Gemini 전용 파서를 사용하며 현재 규칙 fallback은 적용하지
+않습니다. Gemini를 호출할 수 없으면 잘못된 복약 정보를 임의 생성하지 않고 오류를
+반환합니다.
 
 ## 테스트
 
 ```powershell
-python -m pip install -r requirements-dev.txt
-python -m pytest -q
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m ruff check .
 ```
 
-실제 사진 테스트는 다음 순서로 진행합니다.
+## 문서
 
-1. HEAPY에 로그인해 사용자 access token을 준비합니다.
-2. 결과지 이미지를 Base64로 변환합니다.
-3. `EXTRACT` 요청을 보내고 항목·수치·검진일을 확인합니다.
-4. 필요 항목을 수정한 뒤 `CONFIRM_AND_SAVE` 요청을 보냅니다.
-5. `record_id`로 Supabase 저장 결과를 조회합니다.
+- [API 명세](docs/api_spec.md)
+- [시스템 아키텍처](docs/architecture.md)
+- [요구사항](docs/requirements.md)
+- [DB 설계 범위](docs/db_design.md)
 
-요청과 응답 예시는 [API 명세](docs/api_spec.md)에 있습니다.
-
-## 보안 원칙
-
-- Base64 이미지와 전체 OCR 텍스트를 로그에 남기지 않습니다.
-- 응답에 `Cache-Control: no-store`를 설정합니다.
-- 사용자 JWT를 Supabase에 그대로 전달해 RLS를 적용합니다.
-- OCR 추출과 DB 저장을 분리합니다.
-- 인식되지 않은 항목 코드와 빈 결과값은 저장하지 않습니다.
-- 건강검진 수치로 판정을 새로 계산하지 않고 결과지에 인쇄된 판정만 저장합니다.
-
-## HEAPY 문서 정합성
-
-구현 전 다음 HEAPY 문서를 확인했습니다.
-
-- `docs/api_spec.md`: 사용자 JWT와 개인 건강검진 컨텍스트 계약
-- `docs/README.md`: 개인 RDB 데이터 비캐시 원칙과 시스템 아키텍처
-- `docs/node_io_spec.md`: 검진 회차·항목·값·저장 상태 계약
-- `docs/pipeline_state_design.md`: 개인 데이터와 공용 지식의 분리
-- `docs/supabase_auth_chat_db_design.md`: 건강검진 테이블 관계와 RLS
-- `docs/medical_term_db_design.md`: 표준용어는 정규화 용도이며 의료 판단을 생성하지 않는 원칙
-
-기존 HEAPY 작업공간에는 `Reference` 폴더가 없어 위 `docs` 대응 문서를 기준으로
-정합성을 점검했습니다.
+현재 저장소에는 `Reference` 폴더가 없어 위 문서를 구현 기준으로 사용합니다.

@@ -16,30 +16,41 @@ def _positive_int(name: str, default: int) -> int:
     return value
 
 
+def _bounded_int(name: str, default: int, maximum: int) -> int:
+    value = _positive_int(name, default)
+    if value > maximum:
+        raise RuntimeError(f"{name}은 {maximum} 이하의 정수여야 합니다.")
+    return value
+
+
 @dataclass(frozen=True)
 class Settings:
     """Lambda 실행 설정."""
 
     internal_secret_key: str
+    google_vision_api_key: str
     gemini_api_key: str
     gemini_model: str
-    supabase_url: str
-    supabase_publishable_key: str
     max_image_bytes: int
     external_timeout_seconds: int
+    gemini_timeout_seconds: int
+    gemini_pages_per_request: int
 
     @classmethod
     def from_env(cls) -> Settings:
         return cls(
             internal_secret_key=os.environ.get("INTERNAL_SECRET_KEY", "").strip(),
+            google_vision_api_key=os.environ.get(
+                "GOOGLE_VISION_API_KEY", ""
+            ).strip(),
             gemini_api_key=os.environ.get("GEMINI_API_KEY", "").strip(),
             gemini_model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash").strip(),
-            supabase_url=os.environ.get("SUPABASE_URL", "").strip().rstrip("/"),
-            supabase_publishable_key=(
-                os.environ.get("SUPABASE_PUBLISHABLE_KEY")
-                or os.environ.get("SUPABASE_ANON_KEY")
-                or ""
-            ).strip(),
             max_image_bytes=_positive_int("MAX_IMAGE_BYTES", 5 * 1024 * 1024),
             external_timeout_seconds=_positive_int("EXTERNAL_TIMEOUT_SECONDS", 20),
+            gemini_timeout_seconds=_positive_int("GEMINI_TIMEOUT_SECONDS", 60),
+            gemini_pages_per_request=_bounded_int(
+                "GEMINI_PAGES_PER_REQUEST",
+                3,
+                5,
+            ),
         )

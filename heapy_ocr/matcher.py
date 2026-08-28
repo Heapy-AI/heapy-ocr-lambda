@@ -10,6 +10,7 @@ import unicodedata
 from difflib import SequenceMatcher
 
 from heapy_ocr.models import MasterCheckupItem, ParsedCheckupItem, RawCheckupItem
+from heapy_ocr.rule_parser import ITEM_CODE_ALIASES
 
 _ALIASES = {
     "혈압최고": "수축기혈압",
@@ -36,9 +37,17 @@ class CheckupItemMatcher:
     def match(
         self,
         raw_item: RawCheckupItem,
-        textract_confidence: float,
+        ocr_confidence: float,
     ) -> ParsedCheckupItem:
         query = _normalize(raw_item.raw_name)
+        alias_code = ITEM_CODE_ALIASES.get(query)
+        if alias_code is not None:
+            alias_match = next(
+                (item for item in self.catalog if item.item_code == alias_code),
+                None,
+            )
+            if alias_match is not None:
+                return _matched_item(raw_item, alias_match, ocr_confidence, 1.0)
         query = _ALIASES.get(query, query)
         best_item: MasterCheckupItem | None = None
         best_score = 0.0
@@ -50,20 +59,7 @@ class CheckupItemMatcher:
                 best_item = item
 
         matched = best_item if best_score >= 0.66 else None
-        confidence = round(min(textract_confidence, best_score), 4)
-        unit = raw_item.raw_unit or (matched.standard_unit if matched else None)
-        needs_review = matched is None or confidence < 0.82
-        return ParsedCheckupItem(
-            raw_name=raw_item.raw_name,
-            item_code=matched.item_code if matched else None,
-            item_name=matched.item_name if matched else None,
-            raw_value=raw_item.raw_value,
-            value=_normalize_value(raw_item.raw_value),
-            unit=unit,
-            printed_status=raw_item.printed_status,
-            confidence=confidence,
-            needs_review=needs_review,
-        )
+        return _matched_item(raw_item, matched, ocr_confidence, best_score)
 
     @staticmethod
     def _score(query: str, candidate: str, item_code: str) -> float:
@@ -93,3 +89,29 @@ def _normalize(value: str) -> str:
 
 def _normalize_value(value: str) -> str:
     return unicodedata.normalize("NFKC", value).strip()
+
+
+def _matched_item(
+    raw_item: RawCheckupItem,
+    matched: MasterCheckupItem | None,
+    ocr_confidence: float,
+    match_score: float,
+) -> ParsedCheckupItem:
+    confidence = round(min(ocr_confidence, match_score), 4)
+    unit = (
+        matched.standard_unit
+        if matched is not None and matched.standard_unit
+        else raw_item.raw_unit
+    )
+    needs_review = matched is None or confidence < 0.82
+    return ParsedCheckupItem(
+        raw_name=raw_item.raw_name,
+        item_code=matched.item_code if matched else None,
+        item_name=matched.item_name if matched else None,
+        raw_value=raw_item.raw_value,
+        value=_normalize_value(raw_item.raw_value),
+        unit=unit,
+        printed_status=raw_item.printed_status,
+        confidence=confidence,
+        needs_review=needs_review,
+    )
