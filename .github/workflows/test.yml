@@ -4,9 +4,37 @@ on:
   push:
     branches: [dev, main, develop]
   workflow_dispatch:
+    inputs:
+      oidc_probe:
+        description: AWS 접근 없이 OIDC 식별값만 확인
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
+  oidc-probe:
+    if: github.event_name == 'workflow_dispatch' && inputs.oidc_probe && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: 토큰 원문 없이 신뢰 정책 식별값 확인
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // 작성자: 김진우. 토큰을 출력하거나 AWS 인증에 사용하지 않는다.
+            const token = await core.getIDToken('sts.amazonaws.com');
+            core.setSecret(token);
+            const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
+            if (claims.aud !== 'sts.amazonaws.com' || claims.ref !== 'refs/heads/dev' ||
+                claims.repository !== `${context.repo.owner}/${context.repo.repo}`) {
+              throw new Error('OIDC 식별값 불일치');
+            }
+            const identity = {sub: claims.sub, aud: claims.aud};
+            core.info(JSON.stringify(identity));
+            await core.summary.addHeading('OIDC 신뢰 정책 확인').addCodeBlock(
+              JSON.stringify(identity, null, 2), 'json').write();
   test:
     runs-on: ubuntu-latest
     steps:
@@ -30,6 +58,7 @@ jobs:
     needs: test
     if: >-
       github.event_name != 'pull_request' &&
+      !inputs.oidc_probe &&
       (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') &&
       vars.AWS_DEPLOYMENT_APPROVED == 'true' &&
       (github.ref != 'refs/heads/main' || vars.PRODUCTION_DEPLOYMENT_APPROVED == 'true')

@@ -368,8 +368,14 @@ heapy-backend-dev-ec2-role → 권한에서 연결 정책 이름과 권한 경�
 `heapy-backend-erc-pull`이다. 두 번째 이름은 사용자 전달 표기를 그대로 기록했다.
 정책 본문과 권한 경계는 아직 조회하지 않았으며 이름만으로 실제 허용 범위를 단정하지 않는다.
 기존 정책은 유지하고 OCR 자원 생성 후 정확한 버킷 prefix·Lambda live 별칭 권한을 별도 추가한다.
-현재 다음 확인 단계는 IAM 자격 증명 공급자의 `token.actions.githubusercontent.com` 및
-대상 `sts.amazonaws.com` 존재 여부다.
+사용자가 IAM 자격 증명 공급자 `token.actions.githubusercontent.com`과 대상
+`sts.amazonaws.com`이 있다고 확인했다. 이후 서울 리전에 개발 비밀을 생성하고 다음 ARN을 전달했다.
+
+- SecretArn: `arn:aws:secretsmanager:ap-northeast-2:577638373354:secret:heapy/dev/ocr-yHbFSW`
+- ARN 형식·계정·리전은 일치한다. 실제 비밀 내용·암호화 설정·Lambda 접근 권한은 미검증이다.
+- 사용자가 기존 OCR용 ECR이 없다고 확인하고, 생성 승인·콘솔 절차 진행 후 다음 RepositoryUri를 전달했다.
+- RepositoryUri: `577638373354.dkr.ecr.ap-northeast-2.amazonaws.com/heapy-ocr-dev-registry-repository-sprmdejyled7`
+- 이미지 업로드·Lambda 배포는 아직 하지 않았다. 다음 단계는 최초 이미지 업로드용 GitHub OIDC 인증 준비다.
 
 원본 즉시 삭제를 위해 신규 임시 버킷은 버전 관리·복제·Object Lock 없이 계획한다.
 기존 버킷을 재사용한다면 과거 버전까지 먼저 확인한다. 버전 관리 버킷의 일반 DeleteObject는

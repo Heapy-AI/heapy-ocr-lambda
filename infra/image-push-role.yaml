@@ -1,0 +1,52 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 최초 OCR 이미지 업로드 전용 역할 (작성자 김진우)
+Parameters:
+  GitHubRepository:
+    Type: String
+    AllowedPattern: '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+'
+  GitHubSubjectPrefix:
+    Type: String
+    Description: 실제 발급 subject에서 확인한 repo 접두사. 브랜치 부분 제외.
+    AllowedPattern: 'repo:[A-Za-z0-9_.@-]+/[A-Za-z0-9_.@-]+'
+  EcrRepositoryName:
+    Type: String
+    AllowedPattern: '[a-z0-9]+(?:[._/-][a-z0-9]+)*'
+Resources:
+  ImagePushRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: !Sub '${GitHubRepository} dev 최초 이미지 업로드 전용'
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com'
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub '${GitHubSubjectPrefix}:ref:refs/heads/dev'
+      Policies:
+        - PolicyName: initial-image-push
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                  - ecr:PutImage
+                  - ecr:BatchGetImage
+                  - ecr:DescribeImages
+                  - ecr:GetDownloadUrlForLayer
+                Resource: !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${EcrRepositoryName}'
+Outputs:
+  ImagePushRoleArn:
+    Value: !GetAtt ImagePushRole.Arn
