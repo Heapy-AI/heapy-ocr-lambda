@@ -14,6 +14,7 @@ from datetime import date
 from typing import Any
 
 from heapy_ocr.exceptions import ExternalServiceError
+from heapy_ocr.general_checkup import GENERAL_INSTRUCTIONS, general_lines
 from heapy_ocr.models import CheckupSummary, RawCheckupItem
 from heapy_ocr.rule_parser import CheckupExtraction
 
@@ -22,42 +23,6 @@ _RESPONSE_SCHEMA = {
     "properties": {
         "measured_at": {"type": ["string", "null"]},
         "hospital_name": {"type": ["string", "null"]},
-        "document_type": {"type": "string"},
-        "summary_data": {
-            "type": "object",
-            "properties": {
-                "overall_status": {"type": ["string", "null"]},
-                "suspected_diseases": {"type": "array", "items": {"type": "string"}},
-                "diagnosed_diseases": {"type": "array", "items": {"type": "string"}},
-                "lifestyle_recommendations": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                },
-                "recommendations": {"type": "array", "items": {"type": "string"}},
-                "risk_assessments": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "name": {"type": "string"},
-                            "value": {"type": ["string", "null"]},
-                            "unit": {"type": ["string", "null"]},
-                            "description": {"type": ["string", "null"]},
-                            "source_page": {"type": ["integer", "null"]},
-                        },
-                        "required": ["name", "value", "unit", "description", "source_page"],
-                    },
-                },
-            },
-            "required": [
-                "overall_status",
-                "suspected_diseases",
-                "diagnosed_diseases",
-                "lifestyle_recommendations",
-                "recommendations",
-                "risk_assessments",
-            ],
-        },
         "items": {
             "type": "array",
             "items": {
@@ -68,45 +33,12 @@ _RESPONSE_SCHEMA = {
                     "raw_unit": {"type": ["string", "null"]},
                     "printed_status": {"type": ["string", "null"]},
                     "source_page": {"type": ["integer", "null"]},
-                    "detail_data": {
-                        "type": "object",
-                        "properties": {
-                            "interpretation": {"type": ["string", "null"]},
-                            "recommendation": {"type": ["string", "null"]},
-                            "findings": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "name": {"type": "string"},
-                                        "site": {"type": ["string", "null"]},
-                                        "description": {"type": ["string", "null"]},
-                                    },
-                                    "required": ["name", "site", "description"],
-                                },
-                            },
-                        },
-                        "required": ["interpretation", "recommendation", "findings"],
-                    },
                 },
-                "required": [
-                    "raw_name",
-                    "raw_value",
-                    "raw_unit",
-                    "printed_status",
-                    "source_page",
-                    "detail_data",
-                ],
+                "required": ["raw_name", "raw_value", "raw_unit", "printed_status", "source_page"],
             },
         },
     },
-    "required": [
-        "measured_at",
-        "hospital_name",
-        "document_type",
-        "summary_data",
-        "items",
-    ],
+    "required": ["measured_at", "hospital_name", "items"],
 }
 
 
@@ -122,21 +54,8 @@ class GeminiCheckupParser:
         if not self.api_key:
             raise ExternalServiceError("GEMINI_API_KEY가 설정되지 않았습니다.")
 
-        safe_lines = tuple(_redact_identifier(line) for line in lines)
-        prompt = (
-            "다음은 여러 병원의 건강검진 결과지를 OCR한 줄 목록입니다. 문서에 실제로 "
-            "적힌 검진일, 검진기관, 문서 유형, 종합 판정·권고, 검사 항목명, 결과값, "
-            "단위와 인쇄된 판정만 추출하세요. document_type은 GENERAL, COMPREHENSIVE, "
-            "UNKNOWN 중 하나로 반환하고 문서에 인쇄된 종합소견과 권고는 summary_data에 "
-            "넣으세요. 페이지 구분선이 있으면 source_page에 해당 페이지 번호를 넣고, "
-            "내시경·영상·병리 검사의 세부 소견은 detail_data에 보존하세요. "
-            "참고치·정상범위·기준치 숫자는 결과값으로 추출하지 마세요. '비해당', '미실시'인 "
-            "항목과 실제 결과가 없는 항목은 제외하세요. 수치를 재판정하거나 누락된 값을 "
-            "추측하지 말고, 결과가 명확한 항목만 items에 포함하세요. 같은 검사는 한 번만 "
-            "포함하세요. 이 페이지 묶음에 실제 검사 결과가 없으면 items는 빈 배열로 "
-            "반환하세요.\n\n"
-            + json.dumps(safe_lines, ensure_ascii=False)
-        )
+        safe_lines = tuple(_redact_identifier(line) for line in general_lines(lines))
+        prompt = GENERAL_INSTRUCTIONS + "\n\n" + json.dumps(safe_lines, ensure_ascii=False)
         body = self._request_json(prompt)
         return self._validate(body)
 
@@ -158,22 +77,8 @@ class GeminiCheckupParser:
             if first_page_number == last_page_number
             else f"{first_page_number}~{last_page_number}페이지"
         )
-        prompt = (
-            f"첨부된 건강검진 결과지 {page_label}를 직접 읽으세요. 문서에 실제로 적힌 "
-            "검진일, 검진기관, 문서 유형, 종합 판정·권고, 검사 항목명, 결과값, 단위와 "
-            "인쇄된 판정만 추출하세요. document_type은 국가 일반검진 양식이면 GENERAL, "
-            "병원별 종합검진 보고서이면 COMPREHENSIVE, 판단할 수 없으면 UNKNOWN으로 "
-            "반환하세요. 종합소견, 의심·기존 질환, 생활습관 권고, 진료·재검 권고와 "
-            "문서에 기재된 위험도는 summary_data에 넣으세요. 의료적 추론은 하지 마세요. "
-            "표의 열과 행 배치를 함께 확인하여 참고치·정상범위·기준치 숫자를 결과값으로 "
-            "추출하지 마세요. '비해당', '미실시'인 항목과 실제 결과가 없는 항목은 "
-            "제외하세요. 과거 검사값, 그래프 눈금과 목표값은 현재 결과로 추출하지 마세요. "
-            "수치를 재판정하거나 누락된 값을 추측하지 말고, 같은 검사는 한 번만 포함하세요. "
-            "각 결과의 source_page에는 이 PDF의 실제 페이지 번호를 넣으세요. 내시경·초음파·"
-            "영상·병리 검사처럼 한 값으로 표현하기 어려우면 raw_value에는 대표 소견을, "
-            "세부 소견과 권고는 detail_data에 보존하세요. 마스터 항목에 없을 것 같은 검사도 "
-            "버리지 마세요. 환자명과 주민등록번호는 반환하지 마세요. 이 페이지 묶음에 "
-            "실제 검사 결과가 없다면 items는 빈 배열로 반환하세요."
+        prompt = GENERAL_INSTRUCTIONS + (
+            f" 첨부 이미지 범위는 {page_label}입니다. source_page는 실제 PDF 페이지 번호입니다."
         )
         body = self._request_json(prompt, image_pages)
         return self._validate(body)

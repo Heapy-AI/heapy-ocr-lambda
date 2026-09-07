@@ -40,6 +40,9 @@ class CheckupItemMatcher:
         ocr_confidence: float,
     ) -> ParsedCheckupItem:
         query = _normalize(raw_item.raw_name)
+        if "청력" in query and "1000" not in query:
+            # 일반 청력 판정을 특정 주파수 검사 코드로 추정하지 않는다.
+            return _matched_item(raw_item, None, ocr_confidence, 0.0)
         alias_code = ITEM_CODE_ALIASES.get(query)
         if alias_code is not None:
             alias_match = next(

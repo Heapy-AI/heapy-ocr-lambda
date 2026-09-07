@@ -3,7 +3,9 @@
 import copy
 import hashlib
 import io
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from threading import Barrier, Lock
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -119,7 +121,7 @@ def test_multiple_pdf():
         (image_bytes(), "pdf", "UNSUPPORTED_FORMAT"),
         (image_bytes(), "jpg", "UNSUPPORTED_FORMAT"),
         (pdf_bytes(21), "pdf", "PAGE_LIMIT"),
-        (pdf_bytes(encrypted=True), "pdf", "ENCRYPTED_PDF_POLICY_REQUIRED"),
+        (pdf_bytes(encrypted=True), "pdf", "ENCRYPTED_PDF_UNSUPPORTED"),
     ],
 )
 def test_bad_documents(data, extension, code):
@@ -295,6 +297,100 @@ def test_future_creation_and_unknown_fields_rejected(setup):
     event["createdAt"] = iso(NOW + 60)
     with pytest.raises(ContractError, match="INVALID_REQUEST"):
         worker.execute(event, CONTEXT)
+    event["createdAt"] = iso(NOW)
     event["password"] = "입력 불가"
     with pytest.raises(ContractError, match="INVALID_REQUEST"):
         worker.execute(event, CONTEXT)
+
+
+def test_expiration_is_reported_even_if_cleanup_fails(setup):
+    worker, store, job, event, calls = setup
+    store.fail_delete = True
+    worker.now = lambda: NOW + 1201
+    with pytest.raises(ContractError, match="EXPIRED"):
+        worker.read_result(job)
+    assert worker.execute(event, CONTEXT)["error"]["code"] == "EXPIRED"
+    assert not calls
+
+
+def test_expiration_is_reported_even_if_control_is_missing(setup, monkeypatch):
+    worker, store, job, event, calls = setup
+    worker.now = lambda: NOW + 1201
+
+    def missing(key):
+        raise ContractError("JOB_NOT_FOUND")
+
+    monkeypatch.setattr(store, "read", missing)
+    with pytest.raises(ContractError, match="EXPIRED"):
+        worker.read_result(job)
+    assert worker.execute(event, CONTEXT)["status"] == "expired"
+    assert not calls
+
+
+@pytest.mark.parametrize("initial", ["confirmed", "cancelled", "expired"])
+def test_purge_preserves_terminal_state(setup, initial):
+    worker, store, job, _, _ = setup
+    store.value.update(status=initial, result=None)
+    previous_version = store.version
+    assert worker.purge(job, "cancelled")["status"] == initial
+    assert worker.purge(job, "expired")["status"] == initial
+    assert store.value["status"] == initial and store.version == previous_version
+
+
+def test_concurrent_claim_only_processes_once(setup, monkeypatch):
+    worker, store, _, event, calls = setup
+    barrier, lock = Barrier(2), Lock()
+    original_read, original_cas = store.read, store.cas
+
+    def read(key):
+        with lock:
+            state, etag = original_read(key)
+        if state["status"] == "pending":
+            barrier.wait(timeout=5)
+        return state, etag
+
+    def cas(key, state, etag):
+        with lock:
+            return original_cas(key, state, etag)
+
+    def invoke():
+        try:
+            return worker.execute(event, CONTEXT)["status"]
+        except ContractError as exc:
+            return exc.code
+
+    monkeypatch.setattr(store, "read", read)
+    monkeypatch.setattr(store, "cas", cas)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: invoke(), range(2)))
+    assert sorted(results) == ["STATE_CONFLICT", "completed"]
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("fail_delete", [False, True])
+def test_janitor_recovers_orphan_and_signals_delete_failure(setup, fail_delete):
+    from heapy_ocr.janitor import sweep
+
+    worker, store, job, _, _ = setup
+    store.owner = "123456789012"
+    store.fail_delete = fail_delete
+    old_key = job.payload["source"]["key"]
+    recent_key = f"originals/{uuid4()}/source"
+
+    class Pages:
+        def paginate(self, **kwargs):
+            assert kwargs["ExpectedBucketOwner"] == store.owner
+            if kwargs["Prefix"] == "jobs/":
+                return []
+            return [{"Contents": [
+                {"Key": old_key, "LastModified": datetime.fromtimestamp(NOW - 1201, UTC)},
+                {"Key": recent_key, "LastModified": datetime.fromtimestamp(NOW, UTC)},
+            ]}]
+
+    store.client = SimpleNamespace(get_paginator=lambda name: Pages())
+    if fail_delete:
+        with pytest.raises(ContractError, match="SWEEP_FAILED"):
+            sweep(worker, CONTEXT)
+    else:
+        assert sweep(worker, CONTEXT) == {"deleted": 1, "failed": 0}
+        assert store.deleted == [old_key]

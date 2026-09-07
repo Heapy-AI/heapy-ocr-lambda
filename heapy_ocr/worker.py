@@ -52,10 +52,10 @@ class Worker:
         job = self.job(event)
         if timestamp(event["createdAt"]) > self.now() + 30:
             raise ContractError("INVALID_REQUEST")
-        state, etag = self.state(job)
         if self.now() >= job.expires:
-            self.purge(job, "expired")
+            self.expire(job)
             return response(job.id, "expired", "EXPIRED")
+        state, etag = self.state(job)
         if state["status"] != "pending":
             return self.receipt(job, state)
         deadline = min(
@@ -133,10 +133,10 @@ class Worker:
         )
 
     def read_result(self, job: Job) -> dict:
-        state, _ = self.state(job)
         if self.now() >= job.expires:
-            self.purge(job, "expired")
+            self.expire(job)
             raise ContractError("EXPIRED")
+        state, _ = self.state(job)
         return {
             **self.receipt(job, state),
             "result": (state.get("result") or {}).get("result")
@@ -144,17 +144,29 @@ class Worker:
             else None,
         }
 
+    def expire(self, job: Job) -> None:
+        """회수 장애와 관계없이 만료된 내용의 조회·재실행을 차단한다."""
+        try:
+            self.purge(job, "expired")
+        except Exception:
+            logger.warning("OCR_FAILURE jobId=%s code=CLEANUP_FAILED", job.id)
+
     def purge(self, job: Job, reason: str) -> dict:
         if reason not in ("cancelled", "confirmed", "expired"):
             raise ContractError("INVALID_REQUEST")
         for _ in range(5):
             state, etag = self.state(job)
             try:
-                self.store.cas(
-                    job.key, {**state, "status": reason, "result": None, "errorCode": None}, etag
-                )
+                terminal = state["status"] in ("confirmed", "cancelled", "expired")
+                final_status = state["status"] if terminal else reason
+                if not terminal or state.get("result") is not None:
+                    self.store.cas(
+                        job.key,
+                        {**state, "status": final_status, "result": None, "errorCode": None},
+                        etag,
+                    )
                 self.store.delete(job.payload["source"]["key"])
-                return response(job.id, reason)
+                return response(job.id, final_status)
             except ContractError as exc:
                 if exc.code != "STATE_CONFLICT":
                     raise

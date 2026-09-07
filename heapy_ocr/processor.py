@@ -13,15 +13,15 @@ from heapy_ocr.contract import MAX_RESULT_BYTES, ContractError, encode
 
 
 def process(source: Path, extension: str, document_type: str, max_bytes: int) -> dict:
+    from heapy_ocr.factory import build_medication_service, build_service
     from heapy_ocr.files import convert
-    from lambda_function import _build_medication_service, _build_service
 
     pages = convert(source.read_bytes(), extension, max_bytes)
     if document_type == "health_checkup":
-        result = _build_service().extract_pages(pages)
+        result = build_service().extract_pages(pages)
     else:
-        service = _build_medication_service()
-        # 기존 데모의 5장 제한을 보존하고 앱 경로만 20페이지를 처리한다.
+        service = build_medication_service()
+        # 복약 파서의 5페이지 묶음 제한을 유지하며 최대 20페이지를 처리한다.
         parts = [
             service.extract_pages(pages[start : start + 5]) for start in range(0, len(pages), 5)
         ]

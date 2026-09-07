@@ -66,7 +66,7 @@ def _pdf(data: bytes) -> tuple[bytes, ...]:
     try:
         reader = PdfReader(io.BytesIO(data), strict=True)
         if reader.is_encrypted:
-            raise ContractError("ENCRYPTED_PDF_POLICY_REQUIRED")
+            raise ContractError("ENCRYPTED_PDF_UNSUPPORTED")
         count = len(reader.pages)
         if not 1 <= count <= 20:
             raise ContractError("PAGE_LIMIT")

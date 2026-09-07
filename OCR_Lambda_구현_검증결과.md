@@ -2,7 +2,7 @@
 
 - 작성자: 김진우
 - 작성일: 2026-09-07
-- 실제 배포 상태: 미배포, AWS 리소스 생성·원격 DB 변경·Git 커밋·푸시 없음
+- 실제 배포 상태: 미배포. 초기 구현은 `3569ab7`로 main에 푸시했다. 이번 보완은 해당 커밋에서 분기한 dev에서 진행한다. AWS 리소스 생성·원격 DB 변경 없음.
 
 ## 1. 적용 내용
 
@@ -44,7 +44,7 @@ Lambda Linux 컨테이너, 고정 의존성, CloudFormation 인프라 3종, GitH
 
 | 검증 | 결과 |
 |---|---|
-| `python -m pytest -o addopts= -q` | 43개 통과, 마지막 실행 1.70초 |
+| `python -m pytest -o addopts= -q` | 이번 일반검진 보완 코드 56개 통과, 2.33초 |
 | `python -m ruff check .` | 통과 |
 | `cfn-lint infra/runtime.yaml infra/registry.yaml infra/deployment-role.yaml` | 3개 템플릿 통과 |
 | `python -m heapy_ocr.selftest` | 합성 PDF 2페이지 변환 성공 |
@@ -59,8 +59,8 @@ Lambda Linux 컨테이너, 고정 의존성, CloudFormation 인프라 3종, GitH
 
 ## 4. 아직 검증하지 못한 사항
 
-- 로컬 Docker 실행 파일이 없어 실제 Lambda Linux 이미지 빌드·실행은 미검증이다. PR에서 컨테이너를 빌드하고 네트워크 없이 selftest를 실행하도록 설정했다. PR 실행 결과를 아직 얻은 것은 아니다.
-- AWS 계정·리전·권한·비용 승인이 없어 실제 Lambda·S3·Secrets Manager·OIDC·EventBridge·CloudWatch 통합 및 배포·실환경 롤백은 미검증이다.
+- 초기 커밋 `3569ab7`의 [Actions 실행 34088345390](https://github.com/Heapy-AI/heapy-ocr-lambda/actions/runs/34088345390)은 테스트·Lambda Linux 이미지 빌드·이미지 내부 합성 PDF selftest가 성공했고 배포 단계는 건너뛰었다. 이번 보완 코드의 Linux 검증은 별도 CI 결과로 판단한다. 로컬에는 Docker가 없다.
+- AWS 계정 `577638373354`와 서울 리전은 확정됐지만 현재 세션의 AWS 프로필·자격 증명이 없고 브라우저에도 AWS 연결 세션이 없다. 실제 Lambda·S3·IAM·Secrets Manager·EventBridge·CloudWatch 조회·통합·배포·실환경 롤백은 미검증이다.
 - 실시간 Gemini·Vision 응답과 인식 품질·20페이지 최대 부하 측정은 수행하지 않았다. 실제 건강 문서를 외부로 전송하지 않았다.
 - 현재 마스터는 OCR 저장소 스냅샷이며 백엔드 지정 경로의 검색에서 대조할 별도 코드 seed를 찾지 못했다. 활성 마스터·대소문자·표준 단위·값 유형은 백엔드 담당자의 최신 기준 대조가 필요하다.
 - TTL, 20MB 바이트 기준, 암호화·손상 파일의 공개 오류 처리, nullable 신뢰도·복약 원문 용법, 이탈 통지는 확인 대기다. 임의로 공개 계약을 확정하지 않았다.
@@ -71,3 +71,30 @@ Lambda Linux 컨테이너, 고정 의존성, CloudFormation 인프라 3종, GitH
 참조 목록과 우선순위는 [백엔드 연동 인계서](백엔드_OCR_Lambda_연동_인계서.md) 1절에 기록했다. 공개 계약은 `HEAPY_BACKEND_API_명세_v1.md`, 저장 규칙은 `HEAPY_DB_개발기준서_v1.md`를 우선하며 API 검토확정결과·전체 아키텍처·요구사항 2개·DB 설계/물리설계/ERD/마이그레이션 적용결과 및 기존 OCR 공유문서와 대조했다. 현재 프로젝트의 Reference와 협업 규칙 파일 부재도 명시했다.
 
 백엔드·프런트는 수정하지 않았다. 백엔드 실행기·조건부 DB 상태 반영·소유권·확정 트랜잭션·purge 재시도·모바일 202/폴링 유지는 해당 담당자에게 인계한다. 배포 완료 상태가 아니다.
+
+## 6. 기존 구현 재점검과 보완
+
+- 만료 판정을 제어 객체 읽기보다 먼저 수행한다. 제어 객체가 없거나 삭제가 실패하더라도 read는 EXPIRED를 반환하고 execute는 재실행하지 않는다. 회수 장애는 건강정보 없는 CLEANUP_FAILED 로그로 남기며 회수기가 재시도한다.
+- purge는 이미 confirmed·cancelled·expired인 종료 상태를 다른 종료 상태로 바꾸지 않는다. 원본 삭제는 다시 시도하되 제거할 결과가 없으면 불필요한 조건부 갱신을 하지 않는다.
+- 동시 호출 두 개가 같은 pending ETag를 읽도록 강제한 테스트에서 한 호출만 OCR을 수행하고 다른 호출은 STATE_CONFLICT를 받는지 검증했다.
+- 고아 원본은 최대 TTL을 넘은 객체만 회수하고 최근 업로드는 유지하는지, 삭제 장애 시 SWEEP_FAILED를 발생시키는지 검증했다. 모두 합성·메모리 대역이며 실제 AWS 성공을 뜻하지 않는다.
+- GitHub 원격에는 점검 시 main만 있었고 로컬 dev를 main의 기존 구현에서 분기했다. GitHub 환경은 없었으며 배포 승인 변수도 설정되지 않았다. 환경·IAM·배포 활성화는 변경하지 않았다.
+
+
+## 7. 일반검진 전용 정리 결과
+
+- 최신 사용자 요청으로 데모 UI·PDF.js·데모 서버·공개 lambda_function.py를 제거했다.
+  OCR 서비스 생성은 factory.py로 분리하고 Dockerfile·processor.py의 데모 의존성을 없앴다.
+  config.py의 공유 내부 키 설정도 제거했다. 기존 복약 파서는 유지한다.
+- general_checkup.py와 Gemini 스키마·프롬프트를 일반검진 표 중심으로 보완했다.
+  별도 암검진과 위험평가 중복값 제외, 체크된 판정만 사용, 참고치 제외, 합성 JSON 매핑을 검증했다.
+- 일반 청력은 주파수가 없으면 특정 1000Hz 마스터로 추정하지 않는다. 텍스트 fallback은
+  체크박스 위치가 모호한 행을 보수적으로 제외한다. 실제 이미지 인식 품질은 미검증이다.
+- 비밀번호 없는 파일만 대상으로 확정하여 암호화 PDF는 ENCRYPTED_PDF_UNSUPPORTED로 거부한다.
+  공개 비밀번호 필드는 없으며 공개 오류 매핑은 백엔드 인계 대상이다.
+- 첨부 PDF를 로컬 렌더링해 4페이지 양식을 확인했다. 외부 OCR API 호출·AWS 업로드는 없으며
+  실제 수검자 정보·검사값을 테스트에 복제하지 않았다. 렌더링 임시 이미지 4개는 삭제했다.
+- tests/test_general_checkup.py의 합성 검증 5개를 추가했다. 총 56개 통과·Ruff 통과다.
+  현재 변경분은 로컬 검증이며 초기 커밋의 Linux CI 결과를 대신 사용하지 않는다.
+- AWS는 사용자의 콘솔 로그인 경로로 진행하며 백엔드 실행 역할의 연결 정책을 확인하는 단계다.
+  IAM 정책 연결·비밀 생성·유료 자원 생성·배포 활성화는 수행하지 않았다.

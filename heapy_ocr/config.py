@@ -27,7 +27,6 @@ def _bounded_int(name: str, default: int, maximum: int) -> int:
 class Settings:
     """Lambda 실행 설정."""
 
-    internal_secret_key: str
     google_vision_api_key: str
     gemini_api_key: str
     gemini_model: str
@@ -39,7 +38,6 @@ class Settings:
     @classmethod
     def from_env(cls) -> Settings:
         return cls(
-            internal_secret_key=os.environ.get("INTERNAL_SECRET_KEY", "").strip(),
             google_vision_api_key=os.environ.get(
                 "GOOGLE_VISION_API_KEY", ""
             ).strip(),

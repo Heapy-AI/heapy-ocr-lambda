@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from heapy_ocr.exceptions import OcrError
+from heapy_ocr.general_checkup import general_lines
 from heapy_ocr.models import CheckupSummary, MasterCheckupItem, RawCheckupItem
 
 _DATE_PATTERNS = (
@@ -133,6 +134,7 @@ class RuleBasedCheckupParser:
         )
 
     def parse(self, lines: tuple[str, ...]) -> CheckupExtraction:
+        lines = general_lines(lines)
         measured_at = _extract_date(lines)
         hospital_name = _extract_hospital(lines)
         items: list[RawCheckupItem] = []
@@ -141,6 +143,10 @@ class RuleBasedCheckupParser:
         for raw_line in lines:
             line = _clean_line(raw_line)
             if not line or line.startswith("--- "):
+                continue
+            if any(marker in line for marker in ("□", "■", "☑", "☐", "▣")):
+                # 텍스트 fallback으로 체크 위치·표 열을 보장할 수 없는 행은 추정하지 않는다.
+                pending_term = None
                 continue
 
             compound_items = (
@@ -182,7 +188,7 @@ class RuleBasedCheckupParser:
         if not items:
             raise OcrError(
                 "OCR 원문에서 저장 가능한 건강검진 항목을 찾지 못했습니다. "
-                "원문 OCR 탭에서 검사명과 결과값이 같은 줄에 인식됐는지 확인해 주세요."
+                "검사명과 결과값이 명확하게 보이는 파일로 다시 요청해 주세요."
             )
         return CheckupExtraction(
             measured_at=measured_at,
@@ -333,6 +339,14 @@ def _extract_left_and_right(
     right_code: str,
 ) -> tuple[RawCheckupItem, ...]:
     if label not in line:
+        return ()
+    if label == "청력" and "1000" not in line:
+        qualitative = re.search(r"청력.*?(정상|비정상)\s*/\s*(정상|비정상)", line)
+        if qualitative:
+            return (
+                RawCheckupItem("청력(좌)", qualitative.group(1)),
+                RawCheckupItem("청력(우)", qualitative.group(2)),
+            )
         return ()
     match = re.search(
         rf"{label}[^\d]{{0,20}}(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)",
