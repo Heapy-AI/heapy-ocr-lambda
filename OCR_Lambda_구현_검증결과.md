@@ -1,5 +1,9 @@
 # HEAPY OCR Lambda 구현·검증 결과
 
+최초 이미지 업로드 준비: `scripts/initial_image.py`와 수동 Actions 작업 추가 후
+전체 **66개 테스트 통과(3.37초)**, Ruff 통과. 대상 계정·리전·역할·브랜치 검증과
+합성 PDF 검사 실패 시 업로드 차단을 확인했다. 실제 업로드는 승인 대기다.
+
 최신 보완: IAM 역할 생성이 Description 한글 문자 제약으로 실패했다. image-push-role.yaml과
 deployment-role.yaml의 역할 설명을 수정하고 서비스 제약 회귀 검증을 추가했다.
 전체 테스트 **60개 통과(3.29초)**, Ruff 통과, 인프라 템플릿 4개 검사 통과.

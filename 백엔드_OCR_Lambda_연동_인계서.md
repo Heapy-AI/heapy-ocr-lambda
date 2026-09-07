@@ -383,6 +383,10 @@ heapy-backend-dev-ec2-role → 권한에서 연결 정책 이름과 권한 경�
   이후 사용자 승인으로 생성 시도했으나 IAM Description의 한글 문자 제약으로 실패했다.
   설명만 수정했으며 권한은 그대로다. 테스트 60개와 인프라 검사를 통과했고,
   기존 실패 스택은 유지하며 `heapy-ocr-dev-image-push-role-r2`로 같은 역할 생성을 재시도한다.
+  이후 사용자가 CREATE_COMPLETE를 확인하고 실제 역할 ARN
+  `arn:aws:iam::577638373354:role/heapy-ocr-dev-image-push-role-ImagePushRole-Jn1OXuDIMRn2`를 전달했다.
+  이 실제 ARN을 사용한다. r2는 제안명이며 실제 생성 이름으로 단정하지 않는다.
+  다음 단계는 `AWS_최초_이미지_업로드_실행_확인.md` 범위의 GitHub Actions 최초 이미지 업로드다.
 
 원본 즉시 삭제를 위해 신규 임시 버킷은 버전 관리·복제·Object Lock 없이 계획한다.
 기존 버킷을 재사용한다면 과거 버전까지 먼저 확인한다. 버전 관리 버킷의 일반 DeleteObject는

@@ -9,6 +9,22 @@ on:
         description: AWS 접근 없이 OIDC 식별값만 확인
         type: boolean
         default: false
+      upload_initial_image:
+        description: 승인된 최초 ECR 이미지 업로드 (Lambda 배포 없음)
+        type: boolean
+        default: false
+      image_push_role_arn:
+        description: 승인된 이미지 업로드 역할 ARN
+        type: string
+      ecr_repository_uri:
+        description: 승인된 ECR 저장소 URI
+        type: string
+      aws_account_id:
+        description: 승인된 AWS 계정 ID
+        type: string
+      aws_region:
+        description: 승인된 AWS 리전
+        type: string
 permissions:
   contents: read
 jobs:
@@ -54,11 +70,46 @@ jobs:
         run: docker build --platform linux/amd64 --provenance=false -t heapy-ocr-test .
       - name: 이미지 내부 합성 PDF 변환 검증
         run: docker run --rm --network none --entrypoint python heapy-ocr-test -m heapy_ocr.selftest
+  initial-image:
+    needs: test
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.upload_initial_image &&
+      !inputs.oidc_probe && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: ocr-deploy-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_ACCOUNT_ID: ${{ inputs.aws_account_id }}
+      AWS_REGION: ${{ inputs.aws_region }}
+      IMAGE_PUSH_ROLE_ARN: ${{ inputs.image_push_role_arn }}
+      ECR_REPOSITORY_URI: ${{ inputs.ecr_repository_uri }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install -r requirements.txt
+      - name: AWS 접근 전 대상 검증
+        run: python scripts/initial_image.py --validate-only
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.image_push_role_arn }}
+          aws-region: ${{ inputs.aws_region }}
+          allowed-account-ids: ${{ inputs.aws_account_id }}
+          role-duration-seconds: 1800
+      - uses: aws-actions/amazon-ecr-login@v2
+      - name: 최초 이미지 업로드 및 합성 PDF 검증
+        run: python scripts/initial_image.py
   deploy:
     needs: test
     if: >-
       github.event_name != 'pull_request' &&
       !inputs.oidc_probe &&
+      !inputs.upload_initial_image &&
       (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') &&
       vars.AWS_DEPLOYMENT_APPROVED == 'true' &&
       (github.ref != 'refs/heads/main' || vars.PRODUCTION_DEPLOYMENT_APPROVED == 'true')

@@ -1,7 +1,9 @@
 # 최초 이미지 업로드 역할 생성 확인
 
 - 작성자: 김진우
-- 상태: 사용자 생성 승인 후 첫 스택은 ROLLBACK_COMPLETE. 설명 문자 제약 수정·로컬 검증 완료, 재생성 대기.
+- 상태: 설명 문자 제약 수정 후 사용자가 CREATE_COMPLETE와 아래 역할 ARN을 확인함. 실제 OIDC 역할 인수는 아직 미검증.
+- ImagePushRoleArn: `arn:aws:iam::577638373354:role/heapy-ocr-dev-image-push-role-ImagePushRole-Jn1OXuDIMRn2`
+- 실제 전달된 역할은 원래 스택명 접두사다. r2는 재시도 제안명이었으며 사용자가 확인한 실제 ARN을 사용한다.
 - 계정·리전: `577638373354`, `ap-northeast-2`
 
 ## 필요한 이유와 범위
