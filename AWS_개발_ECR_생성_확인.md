@@ -1,7 +1,7 @@
 # OCR 개발용 ECR 생성 확인
 
 - 작성자: 김진우
-- 상태: 사용자가 생성 후 RepositoryUri 전달. 실제 이미지 업로드·Lambda 배포는 미실행.
+- 상태: 사용자 생성·RepositoryUri 전달 후 Actions 34119963614에서 최초 이미지 업로드 성공. Lambda 배포는 미실행.
 - 계정: `577638373354`
 - 리전: 서울 `ap-northeast-2`
 - 사용자 확인: 기존 OCR용 저장소가 없어 승인 후 CloudFormation 생성 절차 진행

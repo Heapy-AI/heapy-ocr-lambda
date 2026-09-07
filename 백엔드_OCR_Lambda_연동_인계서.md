@@ -2,10 +2,25 @@
 
 - 작성자: 김진우
 - 작성일: 2026-09-07
-- 상태: 구현·로컬 검증 완료, AWS 리소스 생성 및 배포 미실행
+- 상태: 비밀·ECR·초기 업로드 역할은 사용자 콘솔 생성 확인, 실제 GitHub OIDC 인증·ECR 이미지 업로드 성공. Lambda 생성·배포 미실행.
 - 내부 계약: `1.0` 제안 구현. 아래 미확정 사항은 공개 API 변경 승인으로 간주하지 않는다.
 
 ## 1. 확인한 기준 문서와 우선순위
+
+최신 실행 결과는 아래와 같다. 이후 절의 초기 준비·미검증 기록은 당시 시점의 이력으로 구분한다.
+
+| 실제 확인 항목 | 값·상태 |
+|---|---|
+| 최초 이미지 실행 | [Actions 34119963614](https://github.com/Heapy-AI/heapy-ocr-lambda/actions/runs/34119963614), 성공 |
+| 이미지 Git 커밋 | `6f6bff11110d868de2c34d891a6af6099260b691` |
+| ImageUri | `577638373354.dkr.ecr.ap-northeast-2.amazonaws.com/heapy-ocr-dev-registry-repository-sprmdejyled7@sha256:a1e309a43afa0f72ad36ecd91fdeef336de6649612027c7b39960d95369a0e09` |
+| 이미지 저장 크기 | `218115720`바이트 |
+| ImagePushRoleArn | `arn:aws:iam::577638373354:role/heapy-ocr-dev-image-push-role-ImagePushRole-Jn1OXuDIMRn2` — 실제 인증·업로드 성공 |
+| 런타임 자원 | OcrBucket·WorkerFunctionName·WorkerAliasArn·JanitorFunctionName·WorkerRoleArn·BackendPolicyArn·Lambda 버전은 아직 없음 |
+| 정규 코드 배포 역할 | DeploymentRoleArn은 아직 없음. ImagePushRoleArn과 구분 |
+
+테스트 66개·정적 검사·인프라 검사·Linux 합성 PDF 변환은 Actions에서 성공했다.
+Lambda 생성·배포·S3 원본 처리·실제 Gemini·모바일 종단 간 검증은 아직 수행하지 않았다.
 
 현재 OCR 프로젝트에 `AGENTS.md`, `Reference`, `Reference/rule`은 없다. 대화에 제공된 협업 규칙과 아래 실제 문서를 참조했다. 없는 Reference 파일을 참조했다고 간주하지 않는다.
 

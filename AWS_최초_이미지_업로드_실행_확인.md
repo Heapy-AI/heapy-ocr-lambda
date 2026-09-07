@@ -1,7 +1,7 @@
 # 최초 OCR 이미지 업로드 실행 확인
 
 - 작성자: 김진우
-- 상태: 구현·로컬 검증 완료, 실제 업로드 실행 승인 대기
+- 상태: 사용자 승인 후 최초 이미지 업로드 성공. Lambda 생성·배포는 미실행.
 - 계정·리전: `577638373354`, `ap-northeast-2`
 - 저장소·브랜치: `Heapy-AI/heapy-ocr-lambda`, `dev`
 - ECR: `577638373354.dkr.ecr.ap-northeast-2.amazonaws.com/heapy-ocr-dev-registry-repository-sprmdejyled7`
@@ -45,3 +45,19 @@ GitHub Actions의 Linux 실행 시간도 계정 플랜·남은 포함 사용량�
 - [ECR 업로드 권한](https://docs.aws.amazon.com/AmazonECR/latest/userguide/image-push-iam.html)
 
 현재 프로젝트의 Reference 폴더는 없으며 인계서에 실제 참조 문서를 기록했다.
+
+## 실제 실행 결과
+
+- 실행: [Actions 34119963614](https://github.com/Heapy-AI/heapy-ocr-lambda/actions/runs/34119963614)
+- Git 커밋·이미지 태그: `6f6bff11110d868de2c34d891a6af6099260b691`
+- digest: `sha256:a1e309a43afa0f72ad36ecd91fdeef336de6649612027c7b39960d95369a0e09`
+- ImageUri: `577638373354.dkr.ecr.ap-northeast-2.amazonaws.com/heapy-ocr-dev-registry-repository-sprmdejyled7@sha256:a1e309a43afa0f72ad36ecd91fdeef336de6649612027c7b39960d95369a0e09`
+- ECR 보고 저장 크기: `218115720`바이트, 약 218.12MB 또는 208.01MiB
+- 테스트·정적 검사·인프라 검사·Lambda Linux 이미지·합성 PDF selftest: 성공
+- 실제 OIDC 역할 인수·ECR 로그인·이미지 업로드·등록 digest 조회: 성공
+- test·initial-image 작업: success / deploy 작업: skipped
+- Gemini·Vision·실제 건강 문서·S3 원본 처리 흐름은 호출하지 않았다.
+
+저장 크기는 이번 이미지에 대한 ECR 보고값이다. 총 청구량은 다른 이미지·공유 레이어·보관 기간에
+따라 달라진다. 위 digest를 이후 runtime.yaml의 ImageUri 매개변수로 사용한다.
+인계 문서 후속 커밋이 생겨도 실제 업로드 이미지의 Git 커밋은 위 값으로 기록한다.

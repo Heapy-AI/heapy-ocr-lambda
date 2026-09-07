@@ -1,5 +1,10 @@
 # HEAPY OCR Lambda 구현·검증 결과
 
+최신 AWS 검증: 사용자 승인 후 [Actions 34119963614](https://github.com/Heapy-AI/heapy-ocr-lambda/actions/runs/34119963614)에서
+커밋 `6f6bff11110d868de2c34d891a6af6099260b691`의 테스트·인프라 검사·Linux PDF selftest와
+실제 OIDC 인증·ECR 업로드가 성공했다. 이미지 digest·크기는 `AWS_최초_이미지_업로드_실행_확인.md`에 기록했다.
+Lambda 배포 단계는 skipped이며 Lambda·S3 OCR 흐름과 외부 Gemini 검증은 여전히 미완료다.
+
 최초 이미지 업로드 준비: `scripts/initial_image.py`와 수동 Actions 작업 추가 후
 전체 **66개 테스트 통과(3.37초)**, Ruff 통과. 대상 계정·리전·역할·브랜치 검증과
 합성 PDF 검사 실패 시 업로드 차단을 확인했다. 실제 업로드는 승인 대기다.
