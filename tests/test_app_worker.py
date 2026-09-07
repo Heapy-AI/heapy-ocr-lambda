@@ -143,6 +143,32 @@ def test_duplicate_only_processes_once(setup):
     assert store.deleted == [event["source"]["key"]]
 
 
+def test_approved_ten_minute_ttl_and_delete_before_result_publish(setup, monkeypatch):
+    worker, store, _, event, _ = setup
+    event["expiresAt"] = iso(NOW + 600)
+    worker.max_ttl = 600
+    job = worker.job(event)
+    store.value.update(request=job.payload, fingerprint=job.fingerprint)
+    original_cas = store.cas
+
+    def cas(key, state, etag):
+        if state["status"] == "completed":
+            assert job.payload["source"]["key"] in store.deleted
+        return original_cas(key, state, etag)
+
+    monkeypatch.setattr(store, "cas", cas)
+    assert worker.execute(event, CONTEXT)["status"] == "completed"
+    worker.now = lambda: NOW + 599
+    assert worker.read_result(job)["result"] == {"items": []}
+    worker.now = lambda: NOW + 600
+    with pytest.raises(ContractError, match="EXPIRED"):
+        worker.read_result(job)
+    assert store.value["result"] is None
+    event["expiresAt"] = iso(NOW + 601)
+    with pytest.raises(ContractError, match="INVALID_REQUEST"):
+        worker.job(event)
+
+
 def test_expired_read_erases_result(setup):
     worker, store, job, event, _ = setup
     worker.execute(event, CONTEXT)

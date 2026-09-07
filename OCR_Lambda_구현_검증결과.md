@@ -1,5 +1,10 @@
 # HEAPY OCR Lambda 구현·검증 결과
 
+최신 확정 설정: 파일 20,000,000바이트, 작업 생성부터 최대 TTL 600초,
+Gemini 모델 gemini-2.5-flash-lite. 600초 경계의 조회 차단과 결과 게시 전 원본 삭제를
+추가 검증해 전체 **67개 통과(3.64초)**, Ruff·runtime.yaml 검사 통과.
+런타임 코드 변경 없이 환경변수로 적용하며 실제 Lambda 생성은 동시 실행 한도 확인 대기다.
+
 최신 AWS 검증: 사용자 승인 후 [Actions 34119963614](https://github.com/Heapy-AI/heapy-ocr-lambda/actions/runs/34119963614)에서
 커밋 `6f6bff11110d868de2c34d891a6af6099260b691`의 테스트·인프라 검사·Linux PDF selftest와
 실제 OIDC 인증·ECR 업로드가 성공했다. 이미지 digest·크기는 `AWS_최초_이미지_업로드_실행_확인.md`에 기록했다.
