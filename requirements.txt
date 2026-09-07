@@ -1,1 +1,1 @@
-# 런타임은 Python 표준 라이브러리만 사용하며 별도 설치 의존성이 없다.
+-r requirements.lock

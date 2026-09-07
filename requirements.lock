@@ -1,0 +1,11 @@
+# 직접·간접 런타임 의존성을 고정한다. 작성자: 김진우
+boto3==1.40.21
+botocore==1.40.76
+jmespath==1.1.0
+s3transfer==0.13.1
+python-dateutil==2.9.0.post0
+six==1.17.0
+urllib3==2.7.0
+Pillow==12.3.0
+pypdfium2==5.13.0
+pypdf==6.16.2

@@ -16,7 +16,6 @@ from heapy_ocr.config import Settings
 from heapy_ocr.exceptions import OcrError
 from heapy_ocr.gemini import GeminiCheckupParser
 from heapy_ocr.google_vision import GoogleVisionAnalyzer
-from heapy_ocr.hybrid_parser import HybridCheckupParser
 from heapy_ocr.medication import GeminiMedicationParser
 from heapy_ocr.medication_service import MedicationOcrService
 from heapy_ocr.models import (
@@ -45,16 +44,18 @@ def _build_service() -> HeapyOcrService:
             settings.google_vision_api_key,
             settings.external_timeout_seconds,
         ),
-        parser=HybridCheckupParser(
-            primary=GeminiCheckupParser(
-                settings.gemini_api_key,
-                settings.gemini_model,
-                settings.gemini_timeout_seconds,
-            ),
-            fallback=RuleBasedCheckupParser(MASTER_CHECKUP_ITEMS),
+        parser=GeminiCheckupParser(
+            settings.gemini_api_key,
+            settings.gemini_model,
+            settings.gemini_timeout_seconds,
         ),
         max_image_bytes=settings.max_image_bytes,
         parser_chunk_page_count=settings.gemini_pages_per_request,
+        fallback_parser=(
+            RuleBasedCheckupParser(MASTER_CHECKUP_ITEMS)
+            if settings.google_vision_api_key
+            else None
+        ),
     )
 
 

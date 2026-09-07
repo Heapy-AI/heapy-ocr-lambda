@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import urllib.error
@@ -14,7 +15,7 @@ from datetime import date
 from typing import Any
 
 from heapy_ocr.exceptions import ExternalServiceError, OcrError
-from heapy_ocr.gemini import _http_error_message
+from heapy_ocr.gemini import _http_error_message, _image_mime_type
 from heapy_ocr.models import ParsedMedication
 
 _RESPONSE_SCHEMA = {
@@ -80,7 +81,7 @@ class MedicationExtraction:
 
 
 class GeminiMedicationParser:
-    """OCR 텍스트를 복약 일정 생성용 JSON으로 변환한다."""
+    """약봉투 이미지 또는 OCR 텍스트를 복약 일정용 JSON으로 변환한다."""
 
     def __init__(self, api_key: str, model: str, timeout_seconds: int) -> None:
         self.api_key = api_key
@@ -104,10 +105,44 @@ class GeminiMedicationParser:
             "않거나 문서에 없는 값은 null 또는 빈 배열로 두고 의학적 판단을 하지 마세요.\n\n"
             + json.dumps(safe_lines, ensure_ascii=False)
         )
+        body = self._request_json(prompt)
+        return self._validate(body)
+
+    def parse_images(
+        self,
+        image_pages: tuple[bytes, ...],
+    ) -> MedicationExtraction:
+        """약봉투 이미지를 Gemini가 직접 읽어 복약 정보로 구조화한다."""
+
+        if not self.api_key:
+            raise ExternalServiceError("GEMINI_API_KEY가 설정되지 않았습니다.")
+        if not image_pages:
+            raise ExternalServiceError("Gemini에 전달할 약봉투 이미지가 없습니다.")
+
+        prompt = (
+            "첨부된 한국 약국의 약봉투 또는 복약안내문 이미지를 직접 읽으세요. 문서의 "
+            "표, 행과 열 배치를 함께 확인하여 처방일, 조제일, 의료기관, 약국과 약별 복용 "
+            "정보를 추출하세요. 약 이름에 붙은 함량은 strength로 분리하되 medicine_name에는 "
+            "제품명을 유지하세요. 1회 투약량, 1일 투여 횟수, 총 투약일수, 복용 시점, 식사 "
+            "관계와 기타 지시를 각각 분리하세요. 공통 복용법은 해당하는 각 약에 적용하세요. "
+            "정확한 시간이 없다면 시간을 추측하지 마세요. 환자명, 전화번호, 주소와 주민등록번호는 "
+            "반환하지 말고, 읽히지 않거나 없는 값은 null 또는 빈 배열로 두세요."
+        )
+        body = self._request_json(prompt, image_pages)
+        return self._validate(body)
+
+    def _request_json(
+        self,
+        prompt: str,
+        image_pages: tuple[bytes, ...] = (),
+    ) -> Any:
         request = urllib.request.Request(
             "https://generativelanguage.googleapis.com/v1beta/models/"
             f"{self.model}:generateContent",
-            data=json.dumps(_request_payload(prompt), ensure_ascii=False).encode("utf-8"),
+            data=json.dumps(
+                _request_payload(prompt, image_pages),
+                ensure_ascii=False,
+            ).encode("utf-8"),
             headers={
                 "Content-Type": "application/json",
                 "x-goog-api-key": self.api_key,
@@ -133,7 +168,7 @@ class GeminiMedicationParser:
             parsed = json.loads(text)
         except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
             raise ExternalServiceError("Gemini 약봉투 파싱 결과 형식이 올바르지 않습니다.") from exc
-        return self._validate(parsed)
+        return parsed
 
     @staticmethod
     def _validate(payload: Any) -> MedicationExtraction:
@@ -162,7 +197,20 @@ class GeminiMedicationParser:
         )
 
 
-def _request_payload(prompt: str) -> dict[str, Any]:
+def _request_payload(
+    prompt: str,
+    image_pages: tuple[bytes, ...] = (),
+) -> dict[str, Any]:
+    parts: list[dict[str, Any]] = [{"text": prompt}]
+    parts.extend(
+        {
+            "inlineData": {
+                "mimeType": _image_mime_type(image_bytes),
+                "data": base64.b64encode(image_bytes).decode("ascii"),
+            }
+        }
+        for image_bytes in image_pages
+    )
     return {
         "systemInstruction": {
             "parts": [
@@ -174,7 +222,7 @@ def _request_payload(prompt: str) -> dict[str, Any]:
                 }
             ]
         },
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "contents": [{"role": "user", "parts": parts}],
         "generationConfig": {
             "temperature": 0,
             "responseMimeType": "application/json",

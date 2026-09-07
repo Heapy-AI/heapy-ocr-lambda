@@ -1,4 +1,5 @@
-.env
+.env*
+!.env.example
 .venv/
 __pycache__/
 .pytest_cache/
@@ -7,4 +8,15 @@ deployment.zip
 package/
 docs/
 tmp/
-tests/
+.ruff_cache/
+Reference/
+**/Reference/
+*.pdf
+*.png
+*.jpg
+*.jpeg
+ocr-results/
+.terraform/
+*.tfstate*
+*.tfvars
+!*.tfvars.example

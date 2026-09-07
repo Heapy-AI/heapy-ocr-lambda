@@ -7,11 +7,11 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 
 from heapy_ocr.exceptions import OcrError
-from heapy_ocr.models import MasterCheckupItem, RawCheckupItem
+from heapy_ocr.models import CheckupSummary, MasterCheckupItem, RawCheckupItem
 
 _DATE_PATTERNS = (
     re.compile(r"(?P<year>20\d{2})[.\-/년]\s*(?P<month>\d{1,2})[.\-/월]\s*(?P<day>\d{1,2})일?"),
@@ -79,6 +79,12 @@ ITEM_CODE_ALIASES = {
     "egfr": "EGFR",
     "혈색소": "HEMOGLOBIN",
     "헤모글로빈": "HEMOGLOBIN",
+    "백혈구": "WBC_COUNT",
+    "wbc": "WBC_COUNT",
+    "철": "IRON",
+    "iron": "IRON",
+    "25ohvitamindtotal": "VITAMIN_D_25_OH",
+    "비타민25ohvitamindtotal": "VITAMIN_D_25_OH",
     "요단백": "URINE_PROTEIN",
     "요당": "URINE_GLUCOSE",
     "요잠혈": "URINE_OCCULT_BLOOD",
@@ -96,6 +102,8 @@ class CheckupExtraction:
     items: tuple[RawCheckupItem, ...]
     parser_mode: str = "rule"
     parser_warnings: tuple[str, ...] = ()
+    document_type: str = "UNKNOWN"
+    summary: CheckupSummary = field(default_factory=CheckupSummary)
 
 
 @dataclass(frozen=True)

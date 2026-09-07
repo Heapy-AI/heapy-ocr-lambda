@@ -1,0 +1,6 @@
+**
+!requirements.txt
+!requirements.lock
+!lambda_function.py
+!heapy_ocr/
+!heapy_ocr/*.py

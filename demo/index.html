@@ -362,12 +362,11 @@
         if (!state.imagePagesBase64.length) return setStatus("먼저 테스트할 파일을 선택해 주세요.", "error");
         toggleLoading(true);
         try {
-          const pages = await ocrAllPages();
-          const ocrResult = aggregateOcrPages(pages);
-          state.latest["원문 OCR"] = ocrResult;
-          renderOcr(ocrResult);
-
           if (!parseResult) {
+            const pages = await ocrAllPages();
+            const ocrResult = aggregateOcrPages(pages);
+            state.latest["원문 OCR"] = ocrResult;
+            renderOcr(ocrResult);
             document.querySelector("#jsonOutput").textContent = JSON.stringify(ocrResult, null, 2);
             activatePane("ocrPane");
             setStatus("원문 OCR이 완료됐습니다.", "success");
@@ -380,16 +379,15 @@
               : "Gemini로 검진 결과를 구조화하고 있습니다…",
             "loading"
           );
-          const result = await requestJson("/api/parse", {
+          const result = await requestJson("/api/extract", {
             ocr_type: ocrType.value,
-            ocr_pages: pages
+            page_images_base64: state.imagePagesBase64
           });
           state.latest["전체 로직"] = result;
           document.querySelector("#jsonOutput").textContent = JSON.stringify(result, null, 2);
           renderResult(result);
           activatePane("resultPane");
-          const mode = parserModeLabel(result.parser_mode);
-          setStatus(`전체 로직이 완료됐습니다. 사용 파서: ${mode}`, "success");
+          setStatus("전체 로직이 완료됐습니다. 결과를 확인해 주세요.", "success");
         } catch (error) {
           setStatus(error.message, "error");
         } finally {
@@ -453,33 +451,59 @@
           renderMedicationResult(result);
           return;
         }
-        const warnings = (result.warnings || []).map(text => `<span class="pill warning">${escapeHtml(text)}</span>`).join("");
-        const normalized = result.normalized || { results: [], ready: false };
-        const parserLabel = parserModeLabel(result.parser_mode);
-        const rows = (result.items || []).map(item => `
+        const record = result.record || {};
+        const summary = record.summary_data || {};
+        const results = result.results || [];
+        const rows = results.map(item => `
           <tr>
             <td>${escapeHtml(item.raw_name)}</td>
             <td>${escapeHtml(item.item_code || "-")}</td>
-            <td><strong>${escapeHtml(item.value)}</strong></td>
-            <td>${escapeHtml(item.unit || "-")}</td>
-            <td>${escapeHtml(item.printed_status || "-")}</td>
+            <td><strong>${escapeHtml(item.value_numeric ?? item.value_text ?? "-")}</strong></td>
+            <td>${escapeHtml(item.normalized_unit || item.raw_unit || "-")}</td>
+            <td>${escapeHtml(item.status || "-")}</td>
+            <td>${escapeHtml(item.source_page || "-")}</td>
+            <td>${escapeHtml(detailLabel(item.detail_data))}</td>
           </tr>`).join("");
+        const summaryRows = [
+          ["종합 판정", summary.overall_status],
+          ["의심 질환", listLabel(summary.suspected_diseases)],
+          ["기존 질환", listLabel(summary.diagnosed_diseases)],
+          ["생활습관 권고", listLabel(summary.lifestyle_recommendations)],
+          ["진료·재검 권고", listLabel(summary.recommendations)],
+          ["위험도", riskLabel(summary.risk_assessments)]
+        ].filter(([, value]) => value).map(([label, value]) => `
+          <tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`).join("");
         document.querySelector("#resultPane").innerHTML = `
           <div class="summary">
-            <span class="pill">검진일 ${escapeHtml(result.measured_at || "미인식")}</span>
-            <span class="pill">기관 ${escapeHtml(result.hospital_name || "미인식")}</span>
-            <span class="pill">${result.items.length}개 항목</span>
-            <span class="pill">파서 ${escapeHtml(parserLabel || "미확인")}</span>
-            <span class="pill ${normalized.ready ? "" : "warning"}">저장 호환 ${normalized.results.length}개</span>${warnings}
+            <span class="pill">유형 ${escapeHtml(record.document_type || "UNKNOWN")}</span>
+            <span class="pill">검진일 ${escapeHtml(record.measured_at || "미인식")}</span>
+            <span class="pill">기관 ${escapeHtml(record.hospital_name || "미인식")}</span>
+            <span class="pill">${results.length}개 항목</span>
           </div>
+          ${summaryRows ? `<div class="table-wrap"><table><tbody>${summaryRows}</tbody></table></div>` : ""}
           <div class="table-wrap"><table>
-            <thead><tr><th>OCR 항목명</th><th>매칭 코드</th><th>결과값</th><th>단위</th><th>인쇄 판정</th></tr></thead>
-            <tbody>${rows || "<tr><td colspan='5'>추출된 항목이 없습니다.</td></tr>"}</tbody>
+            <thead><tr><th>OCR 항목명</th><th>매칭 코드</th><th>결과값</th><th>단위</th><th>인쇄 판정</th><th>페이지</th><th>세부 소견</th></tr></thead>
+            <tbody>${rows || "<tr><td colspan='7'>추출된 항목이 없습니다.</td></tr>"}</tbody>
           </table></div>`;
       }
 
+      function listLabel(values) {
+        return (values || []).join(" · ");
+      }
+
+      function riskLabel(values) {
+        return (values || []).map(item => [item.name, item.value, item.unit, item.description]
+          .filter(Boolean).join(" ")).join(" · ");
+      }
+
+      function detailLabel(value) {
+        if (!value || Object.keys(value).length === 0) return "-";
+        const findings = (value.findings || []).map(item =>
+          [item.name, item.site, item.description].filter(Boolean).join(" / "));
+        return [value.interpretation, value.recommendation, ...findings].filter(Boolean).join(" · ") || "-";
+      }
+
       function renderMedicationResult(result) {
-        const warnings = (result.warnings || []).map(text => `<span class="pill warning">${escapeHtml(text)}</span>`).join("");
         const rows = (result.medications || []).map(item => `
           <tr>
             <td>${escapeHtml(item.medicine_name)}</td>
@@ -497,7 +521,7 @@
             <span class="pill">조제일 ${escapeHtml(result.dispensed_at || "미인식")}</span>
             <span class="pill">의료기관 ${escapeHtml(result.medical_institution_name || "미인식")}</span>
             <span class="pill">약국 ${escapeHtml(result.pharmacy_name || "미인식")}</span>
-            <span class="pill">${result.medications.length}개 약</span>${warnings}
+            <span class="pill">${result.medications.length}개 약</span>
           </div>
           <div class="table-wrap"><table>
             <thead><tr><th>약 이름</th><th>함량</th><th>1회량</th><th>횟수</th><th>투약일수</th><th>복용 시점</th><th>식사 관계</th><th>기타 지시</th></tr></thead>
@@ -513,12 +537,6 @@
       function activatePane(id) {
         document.querySelectorAll(".tab").forEach(tab => tab.classList.toggle("active", tab.dataset.pane === id));
         document.querySelectorAll(".pane").forEach(pane => pane.classList.toggle("active", pane.id === id));
-      }
-      function parserModeLabel(mode) {
-        if (mode === "gemini") return "Gemini";
-        if (mode === "gemini_with_rule_fallback") return "Gemini + 일부 규칙 fallback";
-        if (mode === "rule_fallback") return "규칙 fallback";
-        return mode || "미확인";
       }
       function setStatus(message, type = "") { status.textContent = message; status.className = `status ${type}`; }
       function toggleLoading(loading) { visionButton.disabled = loading; extractButton.disabled = loading; }

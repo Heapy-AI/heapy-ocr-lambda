@@ -1,27 +1,73 @@
-name: OCR 테스트
-
+name: OCR 검증 및 승인 환경 배포
 on:
   pull_request:
   push:
-    branches:
-      - main
-      - develop
-
+    branches: [dev, main, develop]
+  workflow_dispatch:
+permissions:
+  contents: read
 jobs:
   test:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.lock
+            requirements-dev.lock
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: python -m pytest
+      - run: python -m ruff check .
+      - run: cfn-lint infra/*.yaml
+      - name: Lambda Linux 이미지 빌드
+        run: docker build --platform linux/amd64 --provenance=false -t heapy-ocr-test .
+      - name: 이미지 내부 합성 PDF 변환 검증
+        run: docker run --rm --network none --entrypoint python heapy-ocr-test -m heapy_ocr.selftest
+  deploy:
+    needs: test
+    if: >-
+      github.event_name != 'pull_request' &&
+      (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') &&
+      vars.AWS_DEPLOYMENT_APPROVED == 'true' &&
+      (github.ref != 'refs/heads/main' || vars.PRODUCTION_DEPLOYMENT_APPROVED == 'true')
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'dev' }}
+    concurrency:
+      group: ocr-deploy-${{ github.ref }}
+      cancel-in-progress: false
     permissions:
       contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECR_REPOSITORY_URI: ${{ vars.ECR_REPOSITORY_URI }}
+      WORKER_FUNCTION_NAME: ${{ vars.WORKER_FUNCTION_NAME }}
+      JANITOR_FUNCTION_NAME: ${{ vars.JANITOR_FUNCTION_NAME }}
     steps:
-      - name: 소스 체크아웃
-        uses: actions/checkout@v4
-      - name: Python 설정
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
-          python-version: "3.11"
-      - name: 개발 의존성 설치
-        run: python -m pip install -r requirements-dev.txt
-      - name: 정적 검사
-        run: python -m ruff check .
-      - name: 테스트
-        run: python -m pytest
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+      - uses: aws-actions/amazon-ecr-login@v2
+      - name: 고정 커밋 이미지 재사용 또는 빌드
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPOSITORY_NAME="${ECR_REPOSITORY_URI#*/}"
+          if ! aws ecr describe-images --repository-name "$REPOSITORY_NAME" --image-ids "imageTag=$GITHUB_SHA" >/dev/null 2>&1; then
+            docker build --platform linux/amd64 --provenance=false -t "$ECR_REPOSITORY_URI:$GITHUB_SHA" .
+            docker run --rm --network none --entrypoint python "$ECR_REPOSITORY_URI:$GITHUB_SHA" -m heapy_ocr.selftest
+            docker push "$ECR_REPOSITORY_URI:$GITHUB_SHA"
+          fi
+          DIGEST=$(aws ecr describe-images --repository-name "$REPOSITORY_NAME" --image-ids "imageTag=$GITHUB_SHA" --query 'imageDetails[0].imageDigest' --output text)
+          echo "IMAGE_URI=$ECR_REPOSITORY_URI@$DIGEST" >> "$GITHUB_ENV"
+      - run: pip install -r requirements.txt
+      - name: 버전 스모크·별칭 전환·실패 롤백
+        run: python scripts/deploy.py

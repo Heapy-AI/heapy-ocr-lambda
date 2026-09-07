@@ -1,0 +1,285 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: HEAPY OCR 비공개 개발 런타임 (작성자 김진우)
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [dev, production]
+  ImageUri:
+    Type: String
+    Description: 같은 리전 ECR 이미지 digest URI
+    AllowedPattern: '.+@sha256:[a-f0-9]{64}'
+  BackendRoleArn:
+    Type: String
+    Description: 확인된 Spring Boot 실행 IAM 역할 ARN
+  SecretArn:
+    Type: String
+    Description: GEMINI_API_KEY 및 선택 GOOGLE_VISION_API_KEY JSON 비밀 ARN
+  MaxUploadBytes:
+    Type: Number
+    AllowedValues: [20000000, 20971520]
+    Description: 20MB 바이트 해석 승인값 (기본값 없음)
+  MaxResultTtlSeconds:
+    Type: Number
+    MinValue: 60
+    MaxValue: 86400
+    Description: 승인된 최대 임시 보관 초 (기본값 없음, 상한은 운영 제안)
+  GeminiModel:
+    Type: String
+    Description: 승인된 Gemini 모델 이름
+Resources:
+  Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags: [{Key: Environment, Value: !Ref Environment}]
+      OwnershipControls:
+        Rules: [{ObjectOwnership: BucketOwnerEnforced}]
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      LifecycleConfiguration:
+        Rules:
+          - Id: 보조회수
+            Status: Enabled
+            ExpirationInDays: 2
+            AbortIncompleteMultipartUpload: {DaysAfterInitiation: 1}
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource: [!GetAtt Bucket.Arn, !Sub '${Bucket.Arn}/*']
+            Condition: {Bool: {'aws:SecureTransport': 'false'}}
+          - Effect: Deny
+            Principal: '*'
+            Action: [s3:GetObject, s3:PutObject, s3:DeleteObject, s3:ListBucket]
+            Resource: [!GetAtt Bucket.Arn, !Sub '${Bucket.Arn}/*']
+            Condition:
+              ArnNotEquals:
+                aws:PrincipalArn:
+                  - !Ref BackendRoleArn
+                  - !GetAtt WorkerRole.Arn
+                  - !GetAtt JanitorRole.Arn
+                  - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+          - Effect: Deny
+            Principal: '*'
+            Action: s3:PutObject
+            Resource: !Sub '${Bucket.Arn}/originals/*'
+            Condition: {'Null': {'s3:if-none-match': 'true'}}
+          - Effect: Deny
+            Principal: '*'
+            Action: s3:PutObject
+            Resource: !Sub '${Bucket.Arn}/jobs/*'
+            Condition: {'Null': {'s3:if-none-match': 'true', 's3:if-match': 'true'}}
+  BackendPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Backend-only OCR integration permissions
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !Ref Alias
+          - Effect: Allow
+            Action: s3:PutObject
+            Resource: !Sub '${Bucket.Arn}/originals/*'
+          - Effect: Allow
+            Action: [s3:PutObject, s3:GetObject]
+            Resource: !Sub '${Bucket.Arn}/jobs/*'
+  WorkerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ocr-execution
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject]
+                Resource: !Sub '${Bucket.Arn}/jobs/*'
+              - Effect: Allow
+                Action: [s3:GetObject, s3:DeleteObject]
+                Resource: !Sub '${Bucket.Arn}/originals/*'
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref SecretArn
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt WorkerLog.Arn
+  JanitorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ocr-cleanup
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt Bucket.Arn
+                Condition: {StringLike: {'s3:prefix': ['jobs/*', 'originals/*']}}
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+                Resource: !Sub '${Bucket.Arn}/jobs/*'
+              - Effect: Allow
+                Action: s3:DeleteObject
+                Resource: !Sub '${Bucket.Arn}/originals/*'
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt JanitorLog.Arn
+  WorkerLog:
+    Type: AWS::Logs::LogGroup
+    Properties: {RetentionInDays: 7}
+  JanitorLog:
+    Type: AWS::Logs::LogGroup
+    Properties: {RetentionInDays: 7}
+  Worker:
+    Type: AWS::Lambda::Function
+    Properties:
+      PackageType: Image
+      Code: {ImageUri: !Ref ImageUri}
+      Role: !GetAtt WorkerRole.Arn
+      Architectures: [x86_64]
+      Timeout: 900
+      MemorySize: 2048
+      EphemeralStorage: {Size: 512}
+      ReservedConcurrentExecutions: 2
+      LoggingConfig: {LogGroup: !Ref WorkerLog}
+      Environment:
+        Variables:
+          OCR_BUCKET: !Ref Bucket
+          AWS_ACCOUNT_ID: !Ref AWS::AccountId
+          OCR_SECRET_ARN: !Ref SecretArn
+          MAX_UPLOAD_BYTES: !Ref MaxUploadBytes
+          MAX_RESULT_TTL_SECONDS: !Ref MaxResultTtlSeconds
+          GEMINI_MODEL: !Ref GeminiModel
+  Version:
+    Type: AWS::Lambda::Version
+    Properties: {FunctionName: !Ref Worker}
+  Alias:
+    Type: AWS::Lambda::Alias
+    Properties:
+      FunctionName: !Ref Worker
+      FunctionVersion: !GetAtt Version.Version
+      Name: live
+  Janitor:
+    Type: AWS::Lambda::Function
+    Properties:
+      PackageType: Image
+      Code: {ImageUri: !Ref ImageUri}
+      ImageConfig: {Command: [heapy_ocr.janitor.lambda_handler]}
+      Role: !GetAtt JanitorRole.Arn
+      Architectures: [x86_64]
+      Timeout: 300
+      MemorySize: 256
+      ReservedConcurrentExecutions: 1
+      LoggingConfig: {LogGroup: !Ref JanitorLog}
+      Environment:
+        Variables:
+          OCR_BUCKET: !Ref Bucket
+          AWS_ACCOUNT_ID: !Ref AWS::AccountId
+          MAX_UPLOAD_BYTES: !Ref MaxUploadBytes
+          MAX_RESULT_TTL_SECONDS: !Ref MaxResultTtlSeconds
+  JanitorVersion:
+    Type: AWS::Lambda::Version
+    Properties: {FunctionName: !Ref Janitor}
+  JanitorAlias:
+    Type: AWS::Lambda::Alias
+    Properties:
+      FunctionName: !Ref Janitor
+      FunctionVersion: !GetAtt JanitorVersion.Version
+      Name: live
+  Schedule:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: rate(1 minute)
+      State: ENABLED
+      Targets:
+        - Arn: !Ref JanitorAlias
+          Id: cleanup
+          RetryPolicy: {MaximumRetryAttempts: 2, MaximumEventAgeInSeconds: 120}
+  SchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref JanitorAlias
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt Schedule.Arn
+      SourceAccount: !Ref AWS::AccountId
+  WorkerErrors:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{Name: FunctionName, Value: !Ref Worker}]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+  JanitorErrors:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{Name: FunctionName, Value: !Ref Janitor}]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+  HandledFailureMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref WorkerLog
+      FilterPattern: '"OCR_FAILURE"'
+      MetricTransformations:
+        - MetricNamespace: !Sub '${AWS::StackName}/OCR'
+          MetricName: HandledFailures
+          MetricValue: '1'
+          DefaultValue: 0
+  HandledFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      Namespace: !Sub '${AWS::StackName}/OCR'
+      MetricName: HandledFailures
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+Outputs:
+  BackendPolicyArn: {Value: !Ref BackendPolicy}
+  OcrBucket: {Value: !Ref Bucket}
+  WorkerFunctionName: {Value: !Ref Worker}
+  WorkerAliasArn: {Value: !Ref Alias}
+  JanitorFunctionName: {Value: !Ref Janitor}
+  WorkerRoleArn: {Value: !GetAtt WorkerRole.Arn}
+  SecretArn: {Value: !Ref SecretArn}

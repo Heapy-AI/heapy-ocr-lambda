@@ -110,8 +110,11 @@ def _matched_item(
         item_name=matched.item_name if matched else None,
         raw_value=raw_item.raw_value,
         value=_normalize_value(raw_item.raw_value),
+        raw_unit=raw_item.raw_unit,
         unit=unit,
         printed_status=raw_item.printed_status,
+        source_page=raw_item.source_page,
+        detail_data=raw_item.detail_data,
         confidence=confidence,
         needs_review=needs_review,
     )
