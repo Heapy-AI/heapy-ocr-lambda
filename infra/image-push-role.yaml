@@ -15,7 +15,7 @@ Resources:
   ImagePushRole:
     Type: AWS::IAM::Role
     Properties:
-      Description: !Sub '${GitHubRepository} dev 최초 이미지 업로드 전용'
+      Description: !Sub '${GitHubRepository} dev'
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument:
         Version: '2012-10-17'

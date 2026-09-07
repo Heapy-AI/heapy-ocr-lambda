@@ -380,6 +380,9 @@ heapy-backend-dev-ec2-role → 권한에서 연결 정책 이름과 권한 경�
   초기 메타데이터 기반의 이름만 포함된 sub 제안은 사용하지 않는다. image-push-role.yaml과
   deployment-role.yaml의 GitHubSubjectPrefix에 이 값을 전달한다. 확인 근거·권한·입력값은
   `AWS_최초_이미지_업로드_역할_확인.md`에 기록했다. AWS 역할은 아직 생성하지 않았다.
+  이후 사용자 승인으로 생성 시도했으나 IAM Description의 한글 문자 제약으로 실패했다.
+  설명만 수정했으며 권한은 그대로다. 테스트 60개와 인프라 검사를 통과했고,
+  기존 실패 스택은 유지하며 `heapy-ocr-dev-image-push-role-r2`로 같은 역할 생성을 재시도한다.
 
 원본 즉시 삭제를 위해 신규 임시 버킷은 버전 관리·복제·Object Lock 없이 계획한다.
 기존 버킷을 재사용한다면 과거 버전까지 먼저 확인한다. 버전 관리 버킷의 일반 DeleteObject는

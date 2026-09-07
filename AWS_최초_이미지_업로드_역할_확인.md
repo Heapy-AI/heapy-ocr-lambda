@@ -1,7 +1,7 @@
 # 최초 이미지 업로드 역할 생성 확인
 
 - 작성자: 김진우
-- 상태: 템플릿 준비·검사 완료, AWS 역할 생성 승인 대기
+- 상태: 사용자 생성 승인 후 첫 스택은 ROLLBACK_COMPLETE. 설명 문자 제약 수정·로컬 검증 완료, 재생성 대기.
 - 계정·리전: `577638373354`, `ap-northeast-2`
 
 ## 필요한 이유와 범위
@@ -56,3 +56,22 @@ CloudFormation → 스택 생성 → 새 리소스 사용(표준) → 템플릿 
 - API·아키텍처·요구사항·DB 책임 경계는 인계서의 대조 결과를 유지한다. Reference 폴더는 없다.
 - [GitHub OIDC 신뢰 정책](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws)
 - [AWS ECR 업로드 최소 권한](https://docs.aws.amazon.com/AmazonECR/latest/userguide/image-push-iam.html)
+
+## 최초 생성 실패 수정과 재시도
+
+사용자가 전달한 CREATE_FAILED 사유는 IAM 역할 Description의 허용 문자 위반이다.
+image-push-role.yaml의 역할 설명에 포함된 한글이 원인이며, deployment-role.yaml에도
+동일 문제가 있어 두 파일의 역할 설명을 저장소·환경명만 포함하도록 수정했다.
+템플릿 설명·한국어 문서·작성자 주석은 유지한다. 권한 범위와 신뢰 정책은 변경하지 않았다.
+
+cfn-lint만으로 발견하지 못한 AWS 서비스 제약이므로 tests/test_infra_constraints.py에
+모든 IAM 역할 설명의 문자·길이 회귀 검증을 추가했다. 전체 테스트 60개, Ruff 및
+인프라 템플릿 4개 검사가 통과했다. 실제 AWS 재생성 성공은 아직 확인하지 않았다.
+
+ROLLBACK_COMPLETE 스택은 업데이트할 수 없다. 기존 실패 기록을 삭제하지 않고,
+승인된 동일 역할 생성 작업을 스택 이름 `heapy-ocr-dev-image-push-role-r2`로 재시도한다.
+수정된 로컬 image-push-role.yaml을 새로 업로드하고 매개변수는 위 표와 동일하게 입력한다.
+CREATE_COMPLETE 후 실제 ImagePushRoleArn을 확인한다. ECR·비밀·백엔드 자원은 변경하지 않는다.
+
+- [IAM Description 문자 제약](https://docs.aws.amazon.com/IAM/latest/APIReference/API_CreateRole.html)
+- [CloudFormation 스택 상태](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/git-sync-status.html)

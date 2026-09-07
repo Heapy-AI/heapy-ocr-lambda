@@ -24,7 +24,7 @@ Resources:
   DeploymentRole:
     Type: AWS::IAM::Role
     Properties:
-      Description: !Sub '${GitHubRepository} ${GitHubEnvironment} OCR 코드 배포'
+      Description: !Sub '${GitHubRepository} ${GitHubEnvironment}'
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
