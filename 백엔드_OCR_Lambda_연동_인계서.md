@@ -315,6 +315,9 @@ AWS 설정은 사용자가 로그인 가능한 콘솔에서 단계별로 진행�
 
 ## 13. 일반검진 전용 정리와 AWS 콘솔 첫 단계
 
+코드 커밋 `8ae7b8e`는 dev에 푸시했고 [Actions 34115067807](https://github.com/Heapy-AI/heapy-ocr-lambda/actions/runs/34115067807)에서
+56개 테스트와 Linux 이미지 빌드·PDF selftest를 포함한 검증이 성공했다. 배포 단계는 건너뛰었다.
+
 최신 사용자 요청을 우선한다. 일반건강검진 결과통보서의 표에서 실제 검사 결과를 추출한다.
 사용자가 지정한 PDF는 암호화되지 않은 4페이지였으며, 일반검진·위험평가와 별도 위암검진
 페이지가 함께 있었다. 특정 파일의 페이지 번호를 고정하지 않고 문서 제목·내용으로
@@ -360,6 +363,13 @@ AWS 콘솔 첫 단계는 계정 577638373354·서울 리전을 확인한 뒤 IAM
 heapy-backend-dev-ec2-role → 권한에서 연결 정책 이름과 권한 경계 유무를 확인하는 것이다.
 정책을 수정하거나 기존 권한을 삭제하지 않는다. 다음으로 기존 OIDC 공급자·비밀 준비 여부를
 확인하고 12절 순서대로 생성 대상을 승인받는다. [AWS 역할 권한 확인](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_update-role-permissions.html)
+
+사용자가 콘솔에서 확인해 전달한 연결 정책은 `AmazonSSMManagedInstanceCore`와
+`heapy-backend-erc-pull`이다. 두 번째 이름은 사용자 전달 표기를 그대로 기록했다.
+정책 본문과 권한 경계는 아직 조회하지 않았으며 이름만으로 실제 허용 범위를 단정하지 않는다.
+기존 정책은 유지하고 OCR 자원 생성 후 정확한 버킷 prefix·Lambda live 별칭 권한을 별도 추가한다.
+현재 다음 확인 단계는 IAM 자격 증명 공급자의 `token.actions.githubusercontent.com` 및
+대상 `sts.amazonaws.com` 존재 여부다.
 
 원본 즉시 삭제를 위해 신규 임시 버킷은 버전 관리·복제·Object Lock 없이 계획한다.
 기존 버킷을 재사용한다면 과거 버전까지 먼저 확인한다. 버전 관리 버킷의 일반 DeleteObject는

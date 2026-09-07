@@ -95,6 +95,8 @@ Lambda Linux 컨테이너, 고정 의존성, CloudFormation 인프라 3종, GitH
 - 첨부 PDF를 로컬 렌더링해 4페이지 양식을 확인했다. 외부 OCR API 호출·AWS 업로드는 없으며
   실제 수검자 정보·검사값을 테스트에 복제하지 않았다. 렌더링 임시 이미지 4개는 삭제했다.
 - tests/test_general_checkup.py의 합성 검증 5개를 추가했다. 총 56개 통과·Ruff 통과다.
-  현재 변경분은 로컬 검증이며 초기 커밋의 Linux CI 결과를 대신 사용하지 않는다.
+  현재 코드 커밋 `8ae7b8e`를 dev에 푸시했고 [Actions 34115067807](https://github.com/Heapy-AI/heapy-ocr-lambda/actions/runs/34115067807)에서
+  테스트·정적 검사·인프라 검사·Lambda Linux 이미지 빌드·컨테이너 PDF selftest가 모두 성공했다.
+  deploy 단계는 skipped다. 초기 커밋 결과를 현재 검증으로 대신하지 않았다.
 - AWS는 사용자의 콘솔 로그인 경로로 진행하며 백엔드 실행 역할의 연결 정책을 확인하는 단계다.
   IAM 정책 연결·비밀 생성·유료 자원 생성·배포 활성화는 수행하지 않았다.
