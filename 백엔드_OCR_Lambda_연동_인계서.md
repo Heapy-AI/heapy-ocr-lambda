@@ -376,6 +376,10 @@ heapy-backend-dev-ec2-role → 권한에서 연결 정책 이름과 권한 경�
 - 사용자가 기존 OCR용 ECR이 없다고 확인하고, 생성 승인·콘솔 절차 진행 후 다음 RepositoryUri를 전달했다.
 - RepositoryUri: `577638373354.dkr.ecr.ap-northeast-2.amazonaws.com/heapy-ocr-dev-registry-repository-sprmdejyled7`
 - 이미지 업로드·Lambda 배포는 아직 하지 않았다. 다음 단계는 최초 이미지 업로드용 GitHub OIDC 인증 준비다.
+- 실제 GitHub OIDC 발급 확인 결과 접두사는 `repo:Heapy-AI@305710690/heapy-ocr-lambda@1348001285`다.
+  초기 메타데이터 기반의 이름만 포함된 sub 제안은 사용하지 않는다. image-push-role.yaml과
+  deployment-role.yaml의 GitHubSubjectPrefix에 이 값을 전달한다. 확인 근거·권한·입력값은
+  `AWS_최초_이미지_업로드_역할_확인.md`에 기록했다. AWS 역할은 아직 생성하지 않았다.
 
 원본 즉시 삭제를 위해 신규 임시 버킷은 버전 관리·복제·Object Lock 없이 계획한다.
 기존 버킷을 재사용한다면 과거 버전까지 먼저 확인한다. 버전 관리 버킷의 일반 DeleteObject는

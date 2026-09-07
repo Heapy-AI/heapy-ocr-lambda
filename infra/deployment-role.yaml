@@ -7,6 +7,10 @@ Parameters:
   GitHubEnvironment:
     Type: String
     AllowedValues: [dev, production]
+  GitHubSubjectPrefix:
+    Type: String
+    Description: 실제 발급 subject에서 확인한 repo 접두사
+    AllowedPattern: 'repo:[A-Za-z0-9_.@-]+/[A-Za-z0-9_.@-]+'
   OidcProviderArn:
     Type: String
     Description: 확인된 token.actions.githubusercontent.com OIDC 공급자 ARN
@@ -20,6 +24,7 @@ Resources:
   DeploymentRole:
     Type: AWS::IAM::Role
     Properties:
+      Description: !Sub '${GitHubRepository} ${GitHubEnvironment} OCR 코드 배포'
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -30,7 +35,7 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubRepository}:environment:${GitHubEnvironment}'
+                token.actions.githubusercontent.com:sub: !Sub '${GitHubSubjectPrefix}:environment:${GitHubEnvironment}'
       Policies:
         - PolicyName: image-version-deployment
           PolicyDocument:
