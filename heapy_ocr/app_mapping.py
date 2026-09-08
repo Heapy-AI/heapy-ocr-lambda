@@ -4,9 +4,12 @@ import json
 import math
 import re
 
+from heapy_ocr.catalog import MASTER_CHECKUP_ITEMS
 from heapy_ocr.exceptions import OcrError
 from heapy_ocr.findings import checked_text
 from heapy_ocr.models import ExtractionResult, MedicationExtractionResult, _numeric_value
+
+_TEXT_CODES = {item.item_code for item in MASTER_CHECKUP_ITEMS if item.value_type == "text"}
 
 
 def safe_numeric(value: str) -> int | float | None:
@@ -45,7 +48,9 @@ def map_result(result: ExtractionResult | MedicationExtractionResult) -> dict:
                     "itemCode": item.item_code,
                     "itemName": item.item_name or item.raw_name,
                     "value": item.value,
-                    "numericValue": safe_numeric(item.value),
+                    "numericValue": (
+                        None if item.item_code in _TEXT_CODES else safe_numeric(item.value)
+                    ),
                     "unit": item.raw_unit,
                     "status": item.printed_status,
                     "confidence": None,
@@ -69,11 +74,14 @@ def map_result(result: ExtractionResult | MedicationExtractionResult) -> dict:
 
 
 def map_classified_result(result: ExtractionResult) -> dict:
-    """검증용 버전 2 매핑. 기본 Lambda 경로에서는 아직 호출하지 않는다. 작성자: 김진우."""
+    """검진 버전 2 매핑. 검사 결과와 기관 소견을 분리한다. 작성자: 김진우."""
     mapped = map_result(result)
     reviews = [
-        {"classification": "needs_review", "text": checked_text(text, 2000),
-         "reason": "uncertain_classification"}
+        {
+            "classification": "needs_review",
+            "text": checked_text(text, 2000),
+            "reason": "uncertain_classification",
+        }
         for text in result.review_required
     ]
     items = []
@@ -89,25 +97,41 @@ def map_classified_result(result: ExtractionResult) -> dict:
                 text += f" {item['unit']}"
             if item["status"]:
                 text += f" (기관 판정: {item['status']})"
-            reviews.append({"classification": "needs_review",
-                            "text": checked_text(text, 2000), "reason": "unmatched_item"})
+            reviews.append(
+                {
+                    "classification": "needs_review",
+                    "text": checked_text(text, 2000),
+                    "reason": "unmatched_item",
+                }
+            )
         else:
             items.append({**item, "classification": "general_test"})
     findings = [f.to_public("procedure_finding") for f in result.findings]
     opinions = [f.to_public("overall_opinion") for f in result.overall_opinions]
-    if any(len(values) > limit for values, limit in (
-        (items, 200), (reviews, 200), (findings, 50), (opinions, 20),
-    )):
+    if any(
+        len(values) > limit
+        for values, limit in (
+            (items, 200),
+            (reviews, 200),
+            (findings, 50),
+            (opinions, 20),
+        )
+    ):
         raise OcrError("검진 결과 개수 제한을 초과했습니다.")
     for finding in (*findings, *opinions):
         if len(json.dumps(finding, ensure_ascii=False).encode("utf-8")) > 65536:
             raise OcrError("검사 소견 크기 제한을 초과했습니다.")
-    mapped.update({
-        "schemaVersion": 2, "items": items, "findings": findings,
-        "overallOpinions": opinions,
-        "reviewRequired": [{**item, "fieldKey": f"review-{index}"}
-                           for index, item in enumerate(reviews, 1)],
-    })
+    mapped.update(
+        {
+            "schemaVersion": 2,
+            "items": items,
+            "findings": findings,
+            "overallOpinions": opinions,
+            "reviewRequired": [
+                {**item, "fieldKey": f"review-{index}"} for index, item in enumerate(reviews, 1)
+            ],
+        }
+    )
     if len(json.dumps(mapped, ensure_ascii=False).encode("utf-8")) > 262144:
         raise OcrError("검진 결과 크기 제한을 초과했습니다.")
     return mapped

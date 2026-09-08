@@ -34,8 +34,8 @@ def test_general_response_preserves_numbers_and_qualitative_results():
     assert items[1]["itemCode"] == "DIASTOLIC_BP"
     assert items[2]["itemCode"] == "VISUAL_ACUITY_LEFT"
     assert items[3]["itemCode"] == "VISUAL_ACUITY_RIGHT"
-    hearing = next(item for item in items if item["itemName"] == "청력(좌)")
-    assert hearing["itemCode"] is None and hearing["unit"] is None
+    hearing = next(item for item in items if item["itemCode"] == "HEARING_GENERAL_LEFT")
+    assert hearing["numericValue"] is None and hearing["unit"] is None
     assert hearing["value"] == "정상"
     assert all(item["confidence"] is None and item["status"] is None for item in items)
 

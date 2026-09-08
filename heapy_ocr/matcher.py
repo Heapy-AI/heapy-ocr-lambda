@@ -30,7 +30,7 @@ class CheckupItemMatcher:
     """마스터 명칭과 OCR 명칭의 보수적 유사도 매칭."""
 
     def __init__(self, catalog: tuple[MasterCheckupItem, ...]) -> None:
-        self.catalog = catalog
+        self.catalog = tuple(item for item in catalog if item.is_active)
         self._normalized = {item.item_code: _normalize(item.item_name) for item in catalog}
 
     def match(
@@ -49,6 +49,17 @@ class CheckupItemMatcher:
             "시력",
         }:
             return _matched_item(raw_item, None, ocr_confidence, 0.0)
+        aliases = {_normalize(name): code for name, code in ITEM_CODE_ALIASES.items()}
+        general_code = aliases.get(query)
+        if query in {_normalize("HEARING_GENERAL_LEFT"), _normalize("HEARING_GENERAL_RIGHT")}:
+            general_code = next((item.item_code for item in self.catalog
+                                 if _normalize(item.item_code) == query), None)
+        if general_code in {"HEARING_GENERAL_LEFT", "HEARING_GENERAL_RIGHT"}:
+            # 작성자: 김진우 — 일반 청력에 주파수·dB·숫자 결과를 끼워 넣지 않는다.
+            general = next((item for item in self.catalog if item.item_code == general_code), None)
+            if raw_item.raw_unit or re.fullmatch(r"[+-]?\d+(?:\.\d+)?", raw_item.raw_value.strip()):
+                general = None
+            return _matched_item(raw_item, general, ocr_confidence, 1.0 if general else 0.0)
         if ("청력" in query or "hearing" in query) and (
             "1000" not in query
             or not re.fullmatch(r"\d+(?:\.\d+)?", raw_item.raw_value.strip())

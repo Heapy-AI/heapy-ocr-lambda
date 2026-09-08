@@ -25,6 +25,8 @@ class MasterCheckupItem:
     item_code: str
     item_name: str
     standard_unit: str | None
+    value_type: str = "numeric"
+    is_active: bool = True
 
 
 @dataclass(frozen=True)

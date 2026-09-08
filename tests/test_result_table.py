@@ -160,17 +160,17 @@ def test_real_qualitative_and_assessment_results_survive():
     )
     assert [item["itemCode"] for item in items[:4]] == [
         "URINE_PROTEIN",
-        "CHEST_XRAY_PA",
+        "CHEST_XRAY",
         "LIFESTYLE_ASSESSMENT",
         "MEDICAL_INTERVIEW_CONSULTATION",
     ]
-    assert items[4]["itemCode"] is None and items[4]["numericValue"] is None
+    assert items[4]["itemCode"] == "HEARING_GENERAL_LEFT" and items[4]["numericValue"] is None
     assert items[5]["itemCode"] is None
 
 
 def test_qualitative_hearing_never_becomes_frequency_measurement():
     matcher = CheckupItemMatcher(MASTER_CHECKUP_ITEMS)
-    for label in ("청력(좌)", "청력 1000Hz(좌)", "HEARING_1000HZ_LEFT"):
+    for label in ("청력 1000Hz(좌)", "HEARING_1000HZ_LEFT"):
         assert matcher.match(RawCheckupItem(label, "정상"), 1).item_code is None
 
 

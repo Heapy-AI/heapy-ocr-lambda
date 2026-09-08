@@ -8,7 +8,7 @@ import os
 import sys
 from pathlib import Path
 
-from heapy_ocr.app_mapping import map_result
+from heapy_ocr.app_mapping import map_classified_result, map_result
 from heapy_ocr.contract import MAX_RESULT_BYTES, ContractError, encode
 
 
@@ -18,7 +18,11 @@ def process(source: Path, extension: str, document_type: str, max_bytes: int) ->
 
     pages = convert(source.read_bytes(), extension, max_bytes)
     if document_type == "health_checkup":
-        result = build_service().extract_pages(pages)
+        version = os.environ.get("CHECKUP_SCHEMA_VERSION", "2")
+        if version not in {"1", "2"}:
+            raise ContractError("INVALID_SCHEMA_VERSION")
+        result = build_service(classified=version == "2").extract_pages(pages)
+        mapped = map_classified_result(result) if version == "2" else map_result(result)
     else:
         service = build_medication_service()
         # 복약 파서의 5페이지 묶음 제한을 유지하며 최대 20페이지를 처리한다.
@@ -30,7 +34,8 @@ def process(source: Path, extension: str, document_type: str, max_bytes: int) ->
         result = replace(
             parts[0], medications=tuple(item for part in parts for item in part.medications)
         )
-    return {"pageCount": len(pages), "result": map_result(result)}
+        mapped = map_result(result)
+    return {"pageCount": len(pages), "result": mapped}
 
 
 def main() -> None:

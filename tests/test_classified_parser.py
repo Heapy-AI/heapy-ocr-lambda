@@ -20,6 +20,7 @@ def payload():
             {"raw_name": "혈색소", "raw_value": "13.7", "raw_unit": "g/dL"},
             {"raw_name": "청력(좌)", "raw_value": "정상"},
             {"raw_name": "관리가 필요합니다", "raw_value": "안내 문장"},
+            {"raw_name": "미지원 합성 검사", "raw_value": "합성 결과"},
         ],
         "findings": [{"exam_name": "위내시경", "exam_type": "upper_gi_endoscopy",
                       "text": "합성 기관 관찰 내용.\n합성 추적 권고.",
@@ -39,7 +40,7 @@ def mapped(data):
 def test_mixed_report_separates_items_findings_opinions_and_unmatched():
     result = mapped(payload())
     assert result["schemaVersion"] == 2
-    assert [i["itemCode"] for i in result["items"]] == ["HEMOGLOBIN"]
+    assert [i["itemCode"] for i in result["items"]] == ["HEMOGLOBIN", "HEARING_GENERAL_LEFT"]
     assert result["items"][0]["confidence"] is None
     assert len(result["findings"]) == len(result["overallOpinions"]) == 1
     assert "\n" in result["findings"][0]["text"]
@@ -72,7 +73,7 @@ def test_ids_are_stable_across_mapping_and_chunk_merge_does_not_merge_distinct_e
     one = map_classified_result(result)
     assert one == map_classified_result(result)
     assert len({f["findingId"] for f in one["findings"]}) == 4
-    assert len(one["items"]) == 1
+    assert len(one["items"]) == 2
 
 
 def test_endoscopy_leaked_into_items_requires_review_not_automatic_finding():
@@ -165,7 +166,7 @@ def test_current_row_values_and_conflicts_survive_findings_classification():
 
 
 @pytest.mark.parametrize("name, expected", [
-    ("흉부촬영", False), ("흉부 X선", False),
+    ("흉부촬영", True), ("흉부 X선", True),
     ("흉부방사선 직접촬영(PA)", True),
 ])
 def test_chest_direction_is_not_inferred(name, expected):
@@ -174,7 +175,7 @@ def test_chest_direction_is_not_inferred(name, expected):
     result = mapped(data)
     assert bool(result["items"]) is expected
     if expected:
-        assert result["items"][0]["itemCode"] == "CHEST_XRAY_PA"
+        assert result["items"][0]["itemCode"] == ("CHEST_XRAY_PA" if "PA" in name else "CHEST_XRAY")
     else:
         assert result["reviewRequired"][0]["reason"] == "unmatched_item"
 
