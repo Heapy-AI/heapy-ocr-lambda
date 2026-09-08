@@ -69,6 +69,14 @@ _RESPONSE_SCHEMA = {
                         "type": "string",
                         "enum": ["current", "previous", "unknown"],
                     },
+                    "eligibility": {
+                        "type": "string",
+                        "enum": ["not_applicable", "eligible", "ineligible", "unknown"],
+                    },
+                    "result_evidence": {
+                        "type": "string",
+                        "enum": ["printed_value", "selected_option", "unknown"],
+                    },
                     "component_order": {
                         "type": ["string", "null"],
                         "enum": ["systolic_diastolic", "diastolic_systolic", None],
@@ -85,6 +93,8 @@ _RESPONSE_SCHEMA = {
                     "value_origin",
                     "performed",
                     "result_period",
+                    "eligibility",
+                    "result_evidence",
                     "component_order",
                 ],
             },
@@ -202,7 +212,7 @@ class GeminiCheckupParser:
         )
         return CheckupExtraction(
             measured_at=measured_at,
-            hospital_name=_optional_text(payload.get("hospital_name")),
+            hospital_name=_hospital_name(payload.get("hospital_name")),
             items=items,
             parser_mode="gemini",
             document_type=_document_type(payload.get("document_type")),
@@ -275,6 +285,14 @@ def _raw_item(payload: dict[str, Any]) -> RawCheckupItem | None:
         source_page=_positive_integer(payload.get("source_page")),
         detail_data=_detail_data(payload.get("detail_data")),
     )
+
+
+def _hospital_name(value: Any) -> str | None:
+    """문서 제목을 검진기관으로 저장하지 않는다. 작성자: 김진우."""
+    name = _optional_text(value)
+    if name and re.search(r"결과\s*(?:통보서|보고서)|종합\s*소견", name):
+        return None
+    return name
 
 
 def _summary(value: Any) -> CheckupSummary:
