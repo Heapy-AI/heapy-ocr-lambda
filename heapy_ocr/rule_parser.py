@@ -11,6 +11,7 @@ from dataclasses import dataclass, field, replace
 from datetime import date
 
 from heapy_ocr.exceptions import OcrError
+from heapy_ocr.findings import Finding
 from heapy_ocr.general_checkup import excluded_label, general_lines, result_items
 from heapy_ocr.models import CheckupSummary, MasterCheckupItem, RawCheckupItem
 
@@ -132,6 +133,9 @@ class CheckupExtraction:
     parser_warnings: tuple[str, ...] = ()
     document_type: str = "UNKNOWN"
     summary: CheckupSummary = field(default_factory=CheckupSummary)
+    findings: tuple[Finding, ...] = ()
+    overall_opinions: tuple[Finding, ...] = ()
+    review_required: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

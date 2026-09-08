@@ -107,6 +107,10 @@ _RESPONSE_SCHEMA = {
 class GeminiCheckupParser:
     """건강검진 이미지 또는 OCR 텍스트를 항목 JSON으로 변환한다."""
 
+    instructions = GENERAL_INSTRUCTIONS
+    response_schema = _RESPONSE_SCHEMA
+    select_lines = staticmethod(general_lines)
+
     def __init__(self, api_key: str, model: str, timeout_seconds: int) -> None:
         self.api_key = api_key
         self.model = model
@@ -117,8 +121,8 @@ class GeminiCheckupParser:
         if not self.api_key:
             raise ExternalServiceError("GEMINI_API_KEY가 설정되지 않았습니다.")
 
-        safe_lines = tuple(_redact_identifier(line) for line in general_lines(lines))
-        prompt = GENERAL_INSTRUCTIONS + "\n\n" + json.dumps(safe_lines, ensure_ascii=False)
+        safe_lines = tuple(_redact_identifier(line) for line in self.select_lines(lines))
+        prompt = self.instructions + "\n\n" + json.dumps(safe_lines, ensure_ascii=False)
         body = self._request_json(prompt)
         return self._validate(body)
 
@@ -141,7 +145,7 @@ class GeminiCheckupParser:
             if first_page_number == last_page_number
             else f"{first_page_number}~{last_page_number}페이지"
         )
-        prompt = GENERAL_INSTRUCTIONS + (
+        prompt = self.instructions + (
             f" 첨부 이미지 범위는 {page_label}입니다. source_page는 실제 PDF 페이지 번호입니다."
         )
         body = self._request_json(prompt, image_pages)
@@ -155,7 +159,7 @@ class GeminiCheckupParser:
         request = urllib.request.Request(
             f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
             data=json.dumps(
-                _request_payload(prompt, image_pages),
+                _request_payload(prompt, image_pages, self.response_schema),
                 ensure_ascii=False,
             ).encode("utf-8"),
             headers={
@@ -223,6 +227,7 @@ class GeminiCheckupParser:
 def _request_payload(
     prompt: str,
     image_pages: tuple[bytes, ...] = (),
+    response_schema: dict | None = None,
 ) -> dict[str, Any]:
     parts: list[dict[str, Any]] = [{"text": prompt}]
     parts.extend(
@@ -249,7 +254,7 @@ def _request_payload(
         "generationConfig": {
             "temperature": 0,
             "responseMimeType": "application/json",
-            "responseJsonSchema": _RESPONSE_SCHEMA,
+            "responseJsonSchema": response_schema or _RESPONSE_SCHEMA,
         },
     }
 

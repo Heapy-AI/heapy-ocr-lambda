@@ -1,8 +1,11 @@
 """공개 API 검토값으로의 손실을 명시하는 매핑. 작성자: 김진우."""
 
+import json
 import math
 import re
 
+from heapy_ocr.exceptions import OcrError
+from heapy_ocr.findings import checked_text
 from heapy_ocr.models import ExtractionResult, MedicationExtractionResult, _numeric_value
 
 
@@ -63,3 +66,48 @@ def map_result(result: ExtractionResult | MedicationExtractionResult) -> dict:
             for index, item in enumerate(result.medications, 1)
         ]
     }
+
+
+def map_classified_result(result: ExtractionResult) -> dict:
+    """검증용 버전 2 매핑. 기본 Lambda 경로에서는 아직 호출하지 않는다. 작성자: 김진우."""
+    mapped = map_result(result)
+    reviews = [
+        {"classification": "needs_review", "text": checked_text(text, 2000),
+         "reason": "uncertain_classification"}
+        for text in result.review_required
+    ]
+    items = []
+    for original, item in zip(result.items, mapped["items"], strict=True):
+        if item["itemCode"] == "CHEST_XRAY_PA" and not re.search(
+            r"(?<![A-Za-z])PA(?![A-Za-z])", original.raw_name, re.I
+        ):
+            # 촬영 방향이 없는 원문을 PA 검사로 확정하지 않는다. 신규 마스터 적용은 별도다.
+            item = {**item, "itemCode": None, "itemName": original.raw_name}
+        if item["itemCode"] is None:
+            text = f"{item['itemName']}: {item['value']}"
+            if item["unit"]:
+                text += f" {item['unit']}"
+            if item["status"]:
+                text += f" (기관 판정: {item['status']})"
+            reviews.append({"classification": "needs_review",
+                            "text": checked_text(text, 2000), "reason": "unmatched_item"})
+        else:
+            items.append({**item, "classification": "general_test"})
+    findings = [f.to_public("procedure_finding") for f in result.findings]
+    opinions = [f.to_public("overall_opinion") for f in result.overall_opinions]
+    if any(len(values) > limit for values, limit in (
+        (items, 200), (reviews, 200), (findings, 50), (opinions, 20),
+    )):
+        raise OcrError("검진 결과 개수 제한을 초과했습니다.")
+    for finding in (*findings, *opinions):
+        if len(json.dumps(finding, ensure_ascii=False).encode("utf-8")) > 65536:
+            raise OcrError("검사 소견 크기 제한을 초과했습니다.")
+    mapped.update({
+        "schemaVersion": 2, "items": items, "findings": findings,
+        "overallOpinions": opinions,
+        "reviewRequired": [{**item, "fieldKey": f"review-{index}"}
+                           for index, item in enumerate(reviews, 1)],
+    })
+    if len(json.dumps(mapped, ensure_ascii=False).encode("utf-8")) > 262144:
+        raise OcrError("검진 결과 크기 제한을 초과했습니다.")
+    return mapped

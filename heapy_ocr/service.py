@@ -108,6 +108,9 @@ class HeapyOcrService:
             hospital_name=extraction.hospital_name,
             document_type=extraction.document_type,
             summary=extraction.summary,
+            findings=extraction.findings,
+            overall_opinions=extraction.overall_opinions,
+            review_required=extraction.review_required,
             items=items,
             parser_mode=extraction.parser_mode,
             warnings=tuple(warnings),
@@ -138,6 +141,9 @@ class HeapyOcrService:
         """Gemini 장애 시에만 Vision OCR과 규칙 파서를 실행한다."""
 
         if self.fallback_parser is None:
+            raise cause
+        if getattr(self.parser, "preserves_findings", False) is True:
+            # 현재 규칙 파서는 상세 소견을 복구하지 못하므로 불완전한 완료를 막는다.
             raise cause
         documents = tuple(self.ocr_analyzer.analyze(page) for page in image_pages)
         lines = tuple(
@@ -199,6 +205,9 @@ class HeapyOcrService:
                     ),
                     document_type=parsed.document_type,
                     summary=parsed.summary,
+                    findings=parsed.findings,
+                    overall_opinions=parsed.overall_opinions,
+                    review_required=parsed.review_required,
                 )
             )
 
@@ -213,7 +222,10 @@ class HeapyOcrService:
             for extraction in extractions
             for item in extraction.items
         )
-        if not items:
+        if not items and not any(
+            part.findings or part.overall_opinions or part.review_required
+            for part in extractions
+        ):
             raise OcrError("OCR 원문에서 저장 가능한 건강검진 항목을 찾지 못했습니다.")
         modes = {extraction.parser_mode for extraction in extractions}
         if modes == {"gemini"}:
@@ -241,6 +253,9 @@ class HeapyOcrService:
             ),
             document_type=_merged_document_type(extractions),
             summary=_merge_summaries(extractions),
+            findings=tuple(f for part in extractions for f in part.findings),
+            overall_opinions=tuple(f for part in extractions for f in part.overall_opinions),
+            review_required=tuple(f for part in extractions for f in part.review_required),
         )
 
 

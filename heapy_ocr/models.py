@@ -9,6 +9,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from heapy_ocr.findings import Finding
+
 OCR_TYPE_HEALTH_CHECKUP = "HEALTH_CHECKUP"
 OCR_TYPE_MEDICATION = "MEDICATION"
 OPERATION_EXTRACT = "EXTRACT"
@@ -90,6 +92,9 @@ class ExtractionResult:
     items: tuple[ParsedCheckupItem, ...]
     parser_mode: str = "unknown"
     warnings: tuple[str, ...] = field(default_factory=tuple)
+    findings: tuple[Finding, ...] = ()
+    overall_opinions: tuple[Finding, ...] = ()
+    review_required: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """내부 진단 메타데이터를 제외한 사용자 검토용 응답을 만든다."""

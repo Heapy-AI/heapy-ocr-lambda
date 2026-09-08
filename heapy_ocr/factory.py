@@ -1,6 +1,7 @@
 """백엔드 전용 OCR 서비스 구성. 작성자: 김진우."""
 
 from heapy_ocr.catalog import MASTER_CHECKUP_ITEMS
+from heapy_ocr.classified_parser import ClassifiedCheckupParser
 from heapy_ocr.config import Settings
 from heapy_ocr.gemini import GeminiCheckupParser
 from heapy_ocr.google_vision import GoogleVisionAnalyzer
@@ -10,7 +11,7 @@ from heapy_ocr.rule_parser import RuleBasedCheckupParser
 from heapy_ocr.service import HeapyOcrService
 
 
-def build_service() -> HeapyOcrService:
+def build_service(*, classified: bool = False) -> HeapyOcrService:
     """환경변수와 외부 서비스 어댑터로 OCR 서비스를 생성한다."""
     settings = Settings.from_env()
     return HeapyOcrService(
@@ -18,7 +19,7 @@ def build_service() -> HeapyOcrService:
             settings.google_vision_api_key,
             settings.external_timeout_seconds,
         ),
-        parser=GeminiCheckupParser(
+        parser=(ClassifiedCheckupParser if classified else GeminiCheckupParser)(
             settings.gemini_api_key,
             settings.gemini_model,
             settings.gemini_timeout_seconds,
