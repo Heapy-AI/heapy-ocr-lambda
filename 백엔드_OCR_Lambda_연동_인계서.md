@@ -2,10 +2,15 @@
 
 - 작성자: 김진우
 - 작성일: 2026-09-07
-- 상태: 비밀·ECR·초기 업로드 역할은 사용자 콘솔 생성 확인, 실제 GitHub OIDC 인증·ECR 이미지 업로드 성공. Lambda 생성·배포 미실행.
+- 상태: 2026-09-08 개발 런타임 생성·백엔드 역할 호출 및 합성 PDF S3 업로드 → OCR 완료 → 4항목 조회 → 임시 결과 제거 성공 확인. 앱 연동·한국어 양식 품질·자동 배포 활성화는 남아 있음.
 - 내부 계약: `1.0` 제안 구현. 아래 미확정 사항은 공개 API 변경 승인으로 간주하지 않는다.
 
 ## 1. 확인한 기준 문서와 우선순위
+
+추가 확인: 사용자가 S3 콘솔에서 `originals/0ee8ef9c-b44b-4a68-bc99-ca795fc92f73/`
+접두사를 적용한 후에도 객체가 없음을 확인했다. 정리 후 원본 부재는 확인 완료다.
+아래 원본 부재 미검증 기록은 이 확인 이전 이력이다. OCR 직후와 purge 이후의 삭제 시점은
+이번 사후 관찰만으로 구별하지 않는다.
 
 최신 실행 결과는 아래와 같다. 이후 절의 초기 준비·미검증 기록은 당시 시점의 이력으로 구분한다.
 
@@ -16,11 +21,20 @@
 | ImageUri | `577638373354.dkr.ecr.ap-northeast-2.amazonaws.com/heapy-ocr-dev-registry-repository-sprmdejyled7@sha256:a1e309a43afa0f72ad36ecd91fdeef336de6649612027c7b39960d95369a0e09` |
 | 이미지 저장 크기 | `218115720`바이트 |
 | ImagePushRoleArn | `arn:aws:iam::577638373354:role/heapy-ocr-dev-image-push-role-ImagePushRole-Jn1OXuDIMRn2` — 실제 인증·업로드 성공 |
-| 런타임 자원 | OcrBucket·WorkerFunctionName·WorkerAliasArn·JanitorFunctionName·WorkerRoleArn·BackendPolicyArn·Lambda 버전은 아직 없음 |
-| 정규 코드 배포 역할 | DeploymentRoleArn은 아직 없음. ImagePushRoleArn과 구분 |
+| OcrBucket | `heapy-ocr-dev-runtime-bucket-gaxs20bnat6n` |
+| WorkerFunctionName | `heapy-ocr-dev-runtime-Worker-BRv8BzBzvAaB` |
+| WorkerAliasArn | `arn:aws:lambda:ap-northeast-2:577638373354:function:heapy-ocr-dev-runtime-Worker-BRv8BzBzvAaB:live` |
+| JanitorFunctionName | `heapy-ocr-dev-runtime-Janitor-FworyPJX1Wbx` |
+| WorkerRoleArn | `arn:aws:iam::577638373354:role/heapy-ocr-dev-runtime-WorkerRole-6zs7hLLnAAsK` |
+| BackendPolicyArn | `arn:aws:iam::577638373354:policy/heapy-ocr-dev-runtime-BackendPolicy-18wXVpmKiwVJ` |
+| SecretArn | `arn:aws:secretsmanager:ap-northeast-2:577638373354:secret:heapy/dev/ocr-yHbFSW` |
+| 확인 근거 | 사용자 제공 CloudFormation 출력 화면 및 EC2의 STS·Lambda Invoke 실행 결과. live 호출의 ExecutedVersion=1 확인 |
+| 정규 코드 배포 역할 | `arn:aws:iam::577638373354:role/heapy-ocr-dev-deployment-role-DeploymentRole-QNu8mI3TAGBx` — 사용자 전달, GitHub dev 환경에 등록. OIDC 인증·자동 배포 활성화는 아직 미완료 |
 
 테스트 66개·정적 검사·인프라 검사·Linux 합성 PDF 변환은 Actions에서 성공했다.
-Lambda 생성·배포·S3 원본 처리·실제 Gemini·모바일 종단 간 검증은 아직 수행하지 않았다.
+런타임 생성과 백엔드 정책 연결은 사용자 콘솔에서 완료했다고 보고받았다. 안내한 Lambda selftest의 사용자 제공 응답은 `{"contractVersion":"1.0","status":"ok","pageCount":2}`로 합성 PDF 런타임 검증에 성공했다. 이어 EC2의 STS 결과에서 계정 577638373354와 heapy-backend-dev-ec2-role을 확인했다. 같은 EC2의 live 별칭 호출은 StatusCode=200, ExecutedVersion=1, FunctionError 없음과 동일 성공 페이로드로 백엔드 역할의 실제 Invoke까지 확인했다. S3 원본 처리와 삭제·실제 Gemini·모바일 종단 간 검증은 아직 수행하지 않았다.
+
+이후 합성 PDF 통합 실행도 성공했다. 사용자 제공 결과의 jobId는 `0ee8ef9c-b44b-4a68-bc99-ca795fc92f73`이며 업로드 성공, OCR completed(error=null, pageCount=1), 4항목 조회, purge cancelled(error=null), 임시 결과 제거를 확인했다. 앞 문단의 S3·OCR 미검증 기록은 이 실행 이전 이력이다. 원본 객체 부재의 독립 확인·실제 만료 회수·한국어 양식 인식 품질·엔진별 성공 여부·모바일 종단 간 검증은 남아 있다. 자세한 실행 절차와 한계는 `AWS_합성_PDF_연동_테스트.md`를 참조한다.
 
 현재 OCR 프로젝트에 `AGENTS.md`, `Reference`, `Reference/rule`은 없다. 대화에 제공된 협업 규칙과 아래 실제 문서를 참조했다. 없는 Reference 파일을 참조했다고 간주하지 않는다.
 
@@ -93,7 +107,7 @@ AWS 공식 확인(2026-09-07): 동기 요청·응답 각각 6MB, 비동기 요�
   "documentType": "health_checkup",
   "inputType": "pdf",
   "createdAt": "2026-09-07T04:00:00Z",
-  "expiresAt": "2026-09-07T04:20:00Z",
+  "expiresAt": "2026-09-07T04:10:00Z",
   "source": {
     "bucket": "환경별-출력값으로-대체",
     "key": "originals/871f28e6-aec7-41fc-9d5d-02041b3d0d1a/source",
@@ -127,7 +141,7 @@ Lambda는 ETag `If-Match`로 `pending → processing` 선점을 한 번만 수�
   "status": "completed",
   "error": null,
   "pageCount": 2,
-  "expiresAt": "2026-09-07T04:20:00Z"
+  "expiresAt": "2026-09-07T04:10:00Z"
 }
 ```
 

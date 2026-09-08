@@ -1,9 +1,23 @@
 # HEAPY OCR Lambda 구현·검증 결과
 
+추가 확인: 합성 통합 테스트 정리 후 사용자가 S3 콘솔에서 해당 jobId의 원본 접두사를
+적용해 객체 부재를 확인했다. 아래 원본 부재 미검증 기록은 이 확인 이전 이력이다.
+OCR 완료 직후의 삭제 시점을 독립 관찰한 것은 아니다.
+
+2026-09-08 최신 상태: 사용자가 개발 런타임 생성 완료를 보고했고 CloudFormation 출력의
+OCR·회수 Lambda, 임시 S3, 실행 역할·백엔드 정책을 확인했다. 실제 값은 인계서 1절에 기록했다.
+이전 미생성 기록은 당시 이력이다. 사용자가 백엔드 정책 연결 완료와 Lambda selftest 응답
+`{"contractVersion":"1.0","status":"ok","pageCount":2}`를 전달해 합성 PDF 런타임 성공을 확인했다.
+이후 EC2의 백엔드 역할로 live 별칭 호출도 성공했다. 사용자 제공 응답은 StatusCode=200,
+ExecutedVersion=1이며 FunctionError 없이 같은 selftest 성공 페이로드를 반환했다.
+추가로 사용자 제공 EC2 실행 결과에서 jobId `0ee8ef9c-b44b-4a68-bc99-ca795fc92f73`의
+원본 업로드·OCR completed(1페이지)·4항목 조회·purge cancelled·임시 결과 제거를 확인했다.
+원본 객체 부재의 독립 확인·엔진별 성공 여부·한국어 양식 정확도·백엔드 애플리케이션 연동은 남아 있다.
+
 최신 확정 설정: 파일 20,000,000바이트, 작업 생성부터 최대 TTL 600초,
 Gemini 모델 gemini-2.5-flash-lite. 600초 경계의 조회 차단과 결과 게시 전 원본 삭제를
 추가 검증해 전체 **67개 통과(3.64초)**, Ruff·runtime.yaml 검사 통과.
-런타임 코드 변경 없이 환경변수로 적용하며 실제 Lambda 생성은 동시 실행 한도 확인 대기다.
+런타임 코드 변경 없이 환경변수로 적용했다. 동시 실행 한도 대기 기록은 생성 이전 이력이다.
 
 최신 AWS 검증: 사용자 승인 후 [Actions 34119963614](https://github.com/Heapy-AI/heapy-ocr-lambda/actions/runs/34119963614)에서
 커밋 `6f6bff11110d868de2c34d891a6af6099260b691`의 테스트·인프라 검사·Linux PDF selftest와

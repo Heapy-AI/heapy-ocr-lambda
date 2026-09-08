@@ -1,12 +1,17 @@
 # 개발 OCR 런타임 생성 안내
 
 - 작성자: 김진우
-- 상태: 사용자 진행 요청·정책 확정, 동시 실행 한도 사전 확인 중. 런타임 미생성.
+- 상태: 2026-09-08 사용자 한도 1000 보고 후 런타임 생성 완료. EC2 역할 호출·합성 PDF OCR·임시 결과 제거·정리 후 원본 부재 확인 완료.
 - 계정·리전: `577638373354`, 서울 `ap-northeast-2`
 - 스택 이름: `heapy-ocr-dev-runtime`
 - 템플릿: `C:/Users/jinwo/heapy-ocr-lambda/infra/runtime.yaml`
 
 ## 생성 구성과 비용 항목
+
+생성 후 실제 함수·버킷·정책 값은 `백엔드_OCR_Lambda_연동_인계서.md` 1절에 기록했다.
+이하 한도 10·증가 요청 내용은 생성 전 이력이다. BackendPolicyArn 연결과 합성 selftest,
+S3 합성 PDF 통합 검증은 완료했으며 다음 단계는 개발 자동 배포 설정이다.
+회수기는 템플릿에 따라 1분 주기로 생성됐으므로 현재는 실행 비용·로그를 확인할 대상이다.
 
 - 비공개 SSE-S3 임시 버킷 1개: 원본 업로드·작업 제어·검수 결과에 사용.
 - OCR Lambda 1개: x86_64, 메모리 2GiB, 최대 실행 900초, 예약 동시성 2.
@@ -59,6 +64,26 @@ ImageUri는 이미 실제 업로드·합성 검증을 마친 다음 digest를 �
 AWS는 예약되지 않은 동시 실행을 최소 100개 남겨야 하므로 현재 템플릿의 2+1 예약에는
 UnreservedConcurrentExecutions가 103 이상 필요하다. 기존 함수의 예약 상황을 포함한
 실제 값을 확인하기 전에 제출하지 않는다. 부족하면 한도 증가 또는 제한 구성을 검토한다.
+
+사용자가 서울 리전에서 확인한 실제 값은 Concurrent=10, Unreserved=10이다.
+현재 구성은 그대로 생성하면 실패하므로 제출하지 않는다. 우선 Service Quotas에서
+AWS Lambda의 Concurrent executions를 최소 필요값인 103으로 증가 요청하도록 안내한다.
+OCR 예약 2·회수기 예약 1은 유지한다. 계정 한도 증가가 실제 함수 예약이나 자동 호출을 뜻하지 않는다.
+요청 승인 시각·가능 여부는 AWS가 결정하며, 접수만으로 적용 완료라고 보지 않는다.
+적용 후 같은 get-account-settings 명령에서 Unreserved가 103 이상인지 다시 확인한다.
+
+콘솔 경로: Service Quotas → 서울 리전 → AWS 서비스 → AWS Lambda →
+Concurrent executions → 계정 수준 할당량 증가 요청 → 새 값 103.
+사유가 필요하면 다음 내용을 사용한다.
+
+```text
+서울 리전 개발 환경에서 OCR Lambda 2개 동시 실행과 임시 파일 회수 Lambda 1개 동시 실행을
+예약하려고 합니다. 예약되지 않은 동시 실행 최소 100개를 유지하기 위해 현재 계정 한도 10을
+103으로 증가 요청합니다. 각 함수의 예약 동시성은 각각 2와 1로 제한할 예정입니다.
+```
+
+[AWS Lambda 할당량](https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html),
+[할당량 증가 요청](https://docs.aws.amazon.com/servicequotas/latest/userguide/request-quota-increase.html)
 
 AWS 콘솔 CloudShell에서 다음 읽기 전용 명령을 사용한다.
 
