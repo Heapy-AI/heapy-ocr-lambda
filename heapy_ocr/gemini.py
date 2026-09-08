@@ -13,6 +13,7 @@ import urllib.request
 from datetime import date
 from typing import Any
 
+from heapy_ocr.diagnostics import mark_status, observe
 from heapy_ocr.exceptions import ExternalServiceError
 from heapy_ocr.general_checkup import GENERAL_INSTRUCTIONS, general_lines
 from heapy_ocr.models import CheckupSummary, RawCheckupItem
@@ -50,6 +51,7 @@ class GeminiCheckupParser:
         self.model = model
         self.timeout_seconds = timeout_seconds
 
+    @observe("gemini")
     def parse(self, lines: tuple[str, ...]) -> CheckupExtraction:
         if not self.api_key:
             raise ExternalServiceError("GEMINI_API_KEY가 설정되지 않았습니다.")
@@ -59,6 +61,7 @@ class GeminiCheckupParser:
         body = self._request_json(prompt)
         return self._validate(body)
 
+    @observe("gemini")
     def parse_images(
         self,
         image_pages: tuple[bytes, ...],
@@ -106,6 +109,7 @@ class GeminiCheckupParser:
                 request,
                 timeout=self.timeout_seconds,
             ) as response:
+                mark_status(response)
                 body = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             raise ExternalServiceError(_http_error_message(exc)) from exc
@@ -115,7 +119,7 @@ class GeminiCheckupParser:
             ) from exc
         except TimeoutError as exc:
             raise ExternalServiceError("Gemini 응답 시간이 초과되었습니다.") from exc
-        except json.JSONDecodeError as exc:
+        except (json.JSONDecodeError, UnicodeError) as exc:
             raise ExternalServiceError("Gemini 응답이 올바른 JSON이 아닙니다.") from exc
 
         try:
@@ -293,11 +297,5 @@ def _optional_text(value: Any) -> str | None:
 
 
 def _http_error_message(exc: urllib.error.HTTPError) -> str:
-    if exc.code == 429:
-        return "Gemini 할당량을 초과해 규칙 파서로 전환합니다."
-    try:
-        payload = json.loads(exc.read().decode("utf-8", errors="replace"))
-        message = str(payload.get("error", {}).get("message") or f"HTTP {exc.code}")
-    except (AttributeError, json.JSONDecodeError):
-        message = f"HTTP {exc.code}"
-    return f"Gemini 파싱에 실패했습니다: {message}"
+    """외부 응답 본문은 오류 메시지에 포함하지 않는다."""
+    return f"HTTP {exc.code}"

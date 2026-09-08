@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from statistics import median
 from typing import Any
 
+from heapy_ocr.diagnostics import mark_status, observe
 from heapy_ocr.exceptions import ExternalServiceError
 from heapy_ocr.ocr import OcrDocument
 
@@ -26,6 +27,7 @@ class GoogleVisionAnalyzer:
         self.api_key = api_key
         self.timeout_seconds = timeout_seconds
 
+    @observe("vision")
     def analyze(self, image_bytes: bytes) -> OcrDocument:
         if not self.api_key:
             raise ExternalServiceError("GOOGLE_VISION_API_KEY가 설정되지 않았습니다.")
@@ -56,6 +58,7 @@ class GoogleVisionAnalyzer:
                 request,
                 timeout=self.timeout_seconds,
             ) as response:
+                mark_status(response)
                 body = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             message = _http_error_message(exc)
@@ -66,10 +69,8 @@ class GoogleVisionAnalyzer:
                 f"Google Vision OCR에 연결할 수 없습니다: {message}"
             ) from exc
         except TimeoutError as exc:
-            raise ExternalServiceError(
-                "Google Vision OCR 응답 시간이 초과되었습니다."
-            ) from exc
-        except json.JSONDecodeError as exc:
+            raise ExternalServiceError("Google Vision OCR 응답 시간이 초과되었습니다.") from exc
+        except (json.JSONDecodeError, UnicodeError) as exc:
             raise ExternalServiceError(
                 "Google Vision OCR 응답이 올바른 JSON 형식이 아닙니다."
             ) from exc
@@ -85,25 +86,31 @@ class GoogleVisionAnalyzer:
 
         error = vision_response.get("error")
         if isinstance(error, dict):
-            message = str(error.get("message") or "알 수 없는 오류")
-            raise ExternalServiceError(f"Google Vision OCR에 실패했습니다: {message}")
+            code = {
+                4: "TIMEOUT",
+                7: "AUTH_FAILED",
+                16: "AUTH_FAILED",
+                8: "RATE_LIMITED",
+                14: "SERVER_ERROR",
+            }.get(error.get("code"), "HTTP_ERROR")
+            raise ExternalServiceError("Google Vision OCR 호출 실패", code, 200)
 
         annotation = vision_response.get("fullTextAnnotation")
         if not isinstance(annotation, dict):
-            raise ExternalServiceError("결과지에서 텍스트를 인식하지 못했습니다.")
+            raise ExternalServiceError(
+                "결과지에서 텍스트를 인식하지 못했습니다.", "EMPTY_RESULT", 200
+            )
         text = str(annotation.get("text") or "").strip()
         if not text:
-            raise ExternalServiceError("결과지에서 텍스트를 인식하지 못했습니다.")
+            raise ExternalServiceError(
+                "결과지에서 텍스트를 인식하지 못했습니다.", "EMPTY_RESULT", 200
+            )
 
         lines = _spatial_lines(annotation)
         if not lines:
             lines = tuple(line.strip() for line in text.splitlines() if line.strip())
         confidence_values = _word_confidences(annotation)
-        average = (
-            sum(confidence_values) / len(confidence_values)
-            if confidence_values
-            else 0.0
-        )
+        average = sum(confidence_values) / len(confidence_values) if confidence_values else 0.0
         return OcrDocument(
             text=text,
             lines=lines,
@@ -156,9 +163,7 @@ def _spatial_lines(annotation: dict[str, Any]) -> tuple[str, ...]:
                 row_centers.append(word.center_y)
                 continue
             rows[target].append(word)
-            row_centers[target] = sum(item.center_y for item in rows[target]) / len(
-                rows[target]
-            )
+            row_centers[target] = sum(item.center_y for item in rows[target]) / len(rows[target])
         ordered_rows = sorted(zip(row_centers, rows, strict=True), key=lambda row: row[0])
         result.extend(
             " ".join(word.text for word in sorted(row, key=lambda item: item.left))
@@ -193,11 +198,8 @@ def _located_words(page: dict[str, Any]) -> list[_LocatedWord]:
 
 
 def _http_error_message(exc: urllib.error.HTTPError) -> str:
-    try:
-        payload = json.loads(exc.read().decode("utf-8", errors="replace"))
-        return str(payload.get("error", {}).get("message") or f"HTTP {exc.code}")
-    except (AttributeError, json.JSONDecodeError):
-        return f"HTTP {exc.code}"
+    """외부 응답 본문은 오류 메시지에 포함하지 않는다."""
+    return f"HTTP {exc.code}"
 
 
 def _connection_error_message(exc: urllib.error.URLError) -> str:

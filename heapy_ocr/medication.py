@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
+from heapy_ocr.diagnostics import mark_status, observe
 from heapy_ocr.exceptions import ExternalServiceError, OcrError
 from heapy_ocr.gemini import _http_error_message, _image_mime_type
 from heapy_ocr.models import ParsedMedication
@@ -88,6 +89,7 @@ class GeminiMedicationParser:
         self.model = model
         self.timeout_seconds = timeout_seconds
 
+    @observe("gemini_medication")
     def parse(self, lines: tuple[str, ...]) -> MedicationExtraction:
         if not self.api_key:
             raise ExternalServiceError("GEMINI_API_KEY가 설정되지 않았습니다.")
@@ -108,6 +110,7 @@ class GeminiMedicationParser:
         body = self._request_json(prompt)
         return self._validate(body)
 
+    @observe("gemini_medication")
     def parse_images(
         self,
         image_pages: tuple[bytes, ...],
@@ -151,6 +154,7 @@ class GeminiMedicationParser:
         )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                mark_status(response)
                 body = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             raise ExternalServiceError(_http_error_message(exc)) from exc
@@ -160,7 +164,7 @@ class GeminiMedicationParser:
             ) from exc
         except TimeoutError as exc:
             raise ExternalServiceError("Gemini 응답 시간이 초과되었습니다.") from exc
-        except json.JSONDecodeError as exc:
+        except (json.JSONDecodeError, UnicodeError) as exc:
             raise ExternalServiceError("Gemini 응답이 올바른 JSON이 아닙니다.") from exc
 
         try:

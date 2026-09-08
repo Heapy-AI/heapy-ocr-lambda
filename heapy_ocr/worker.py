@@ -16,6 +16,7 @@ import boto3
 from botocore.config import Config
 
 from heapy_ocr.contract import VERSION, ContractError, Job, response, timestamp
+from heapy_ocr.diagnostics import emit
 from heapy_ocr.storage import Store
 
 logger = logging.getLogger(__name__)
@@ -186,6 +187,8 @@ class Worker:
         ]
         child_env = dict(os.environ)
         child_env["MAX_UPLOAD_BYTES"] = str(self.max_bytes)
+        diagnostics = path.parent / "diagnostics.jsonl"
+        child_env["OCR_DIAGNOSTICS_PATH"] = str(diagnostics)
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         process = subprocess.Popen(
             command,
@@ -212,6 +215,10 @@ class Worker:
             if process.poll() is None:
                 process.kill()
             process.wait(timeout=5)
+            try:
+                emit(diagnostics, logger, job.id)
+            except OSError:
+                logger.warning("OCR_FAILURE jobId=%s code=DIAGNOSTICS_UNAVAILABLE", job.id)
 
 
 def build_worker() -> Worker:

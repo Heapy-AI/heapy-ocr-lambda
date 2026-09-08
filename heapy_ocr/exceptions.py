@@ -16,5 +16,7 @@ class OcrError(Exception):
 class ExternalServiceError(OcrError):
     """외부 서비스 호출 실패."""
 
-    def __init__(self, message: str) -> None:
+    def __init__(self, message: str, diagnostic_code=None, http_status=None) -> None:
         super().__init__(message, 503)
+        self.diagnostic_code = diagnostic_code
+        self.http_status = http_status

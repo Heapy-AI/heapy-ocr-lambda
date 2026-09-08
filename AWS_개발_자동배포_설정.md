@@ -4,6 +4,21 @@
 - 작성일: 2026-09-08
 - 범위: Heapy-AI/heapy-ocr-lambda의 dev 개발 배포. 운영은 별도 승인.
 
+## 최초 자동 배포 결과
+
+2026-09-08 사용자 승인 후 개발 자동 배포를 활성화하고 실제 배포를 완료했다.
+
+- 실행: https://github.com/Heapy-AI/heapy-ocr-lambda/actions/runs/34178191058 (성공)
+- 커밋: `bda032bdf78a89893f01613d88f628591c33ffa2`
+- 이미지 digest: `sha256:67e1bdfa2f1850e241dbd7ce2ed93efccae670ec34420b685109931ef56e65c7`
+- Worker live: 버전 `2`, Janitor live: 버전 `2`
+- 테스트 67개·정적 검사·Linux 빌드·PDF 변환·OIDC 인증·ECR 업로드·별칭 전환 후 스모크 성공
+- 저장소 변수 AWS_DEPLOYMENT_APPROVED=true를 조회로 확인했다. 이후 dev push 시 자동 배포한다.
+- 운영 승인 변수는 미설정이다. 운영 main 배포는 활성화하지 않았다.
+- 실패가 없어 실환경 롤백은 실행하지 않았다. 새 버전의 실제 문서 OCR은 재실행하지 않았다.
+
+아래 준비 절차는 이 배포의 진행 이력이다.
+
 ## 1. GitHub 준비
 
 dev 환경을 만들고 배포 허용 규칙을 이름 dev, 유형 branch 하나로 제한했다.
@@ -11,9 +26,9 @@ dev 환경을 만들고 배포 허용 규칙을 이름 dev, 유형 branch 하나
 사용자가 전달한 배포 역할 ARN을 AWS_DEPLOY_ROLE_ARN에 등록하고 GitHub 조회로 확인했다.
 값은 `arn:aws:iam::577638373354:role/heapy-ocr-dev-deployment-role-DeploymentRole-QNu8mI3TAGBx`다.
 사용자가 IAM 신뢰 관계의 audience 및 environment:dev subject 일치를 확인했다.
-실제 권한 본문 및 OIDC 인증 성공은 아직 별도 확인이 필요하다.
+실제 OIDC 인증과 배포에 필요한 권한 사용은 최초 배포에서 성공했다. IAM 정책 전체 본문을 독립 조회한 것은 아니다.
 저장소 변수 AWS_DEPLOYMENT_APPROVED는
-최종 활성화 시 true로 설정한다. 현재는 미설정이라 자동 배포가 실행되지 않는다.
+사용자 최종 승인 후 true로 설정했으며 최초 배포에 적용됐다.
 이 변수는 작업 if 조건에서 사용하므로 환경 변수가 아니라 저장소 변수로 설정한다.
 PRODUCTION_DEPLOYMENT_APPROVED는 미설정으로 유지한다.
 
