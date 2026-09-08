@@ -99,6 +99,25 @@ ITEM_CODE_ALIASES = {
     "요잠혈": "URINE_OCCULT_BLOOD",
     "흉부촬영": "CHEST_XRAY_PA",
     "흉부방사선촬영": "CHEST_XRAY_PA",
+    "height신장": "HEIGHT",
+    "weight체중": "WEIGHT",
+    "waist허리둘레": "WAIST_CIRCUMFERENCE",
+    "혈압수축기systolicbp": "SYSTOLIC_BP",
+    "혈압이완기diastolicbp": "DIASTOLIC_BP",
+    "hb혈색소": "HEMOGLOBIN",
+    "hemoglobin혈색소": "HEMOGLOBIN",
+    "hct적혈구용적": "HEMATOCRIT",
+    "wbc백혈구": "WBC_COUNT",
+    "rbc적혈구": "RBC_COUNT",
+    "platelet혈소판수": "PLATELET_COUNT",
+    "astsgot혈청지오티": "AST",
+    "altsgpt혈청지피티": "ALT",
+    "creatinine크레아티닌": "SERUM_CREATININE",
+    "tcholesterol총콜레스테롤": "TOTAL_CHOLESTEROL",
+    "triglyceride중성지방": "TRIGLYCERIDES",
+    "hdlcholesterol": "HDL_CHOLESTEROL",
+    "ldlcholesterol": "LDL_CHOLESTEROL",
+    "uprotein요단백": "URINE_PROTEIN",
 }
 
 
@@ -147,6 +166,8 @@ class RuleBasedCheckupParser:
         pending_term: _ItemTerm | None = None
         source_page = None
         table_columns = None
+        comparison_layout = False
+        excluded_section = False
 
         for raw_line in lines:
             line = _clean_line(raw_line)
@@ -155,14 +176,27 @@ class RuleBasedCheckupParser:
                 source_page = int(marker.group(1))
                 pending_term = None
                 table_columns = None
+                comparison_layout = False
+                excluded_section = False
                 continue
             if not line:
                 pending_term = None
                 continue
+            section = _section_boundary(line)
+            if section is not None:
+                excluded_section = section
+                table_columns = None
+                pending_term = None
+                continue
+            if excluded_section:
+                continue
+            if re.search(r"과거\s*(?:결과|검사)|이전\s*결과|previous\s*result", line, re.I):
+                comparison_layout = True
+                pending_term = None
             if "|" in line:
                 cells = [cell.strip() for cell in line.strip("|").split("|")]
                 header = _table_columns(cells)
-                if header:
+                if header is not None:
                     table_columns = header
                 elif table_columns:
                     parsed = _table_item(cells, table_columns, source_page)
@@ -170,6 +204,11 @@ class RuleBasedCheckupParser:
                         items.extend(result_items(parsed))
                 pending_term = None
                 continue
+            if comparison_layout:
+                # 열 좌표가 사라진 비교표에서는 첫 숫자를 현재 결과로 추정하지 않는다.
+                pending_term = None
+                continue
+            table_columns = None
             if (
                 excluded_label(line)
                 or re.search(r"참고치|정상범위|목표\s*(?:값|상태)|필요합니다", line)
@@ -314,7 +353,12 @@ class RuleBasedCheckupParser:
 
 
 def _extract_date(lines: tuple[str, ...]) -> str | None:
+    dates = set()
     for line in lines:
+        if not re.search(r"검진\s*(?:일자|일|날짜)|검사\s*(?:일자|일)|수검일", line):
+            continue
+        if re.search(r"과거|이전|발행|출력|판정", line):
+            continue
         for pattern in _DATE_PATTERNS:
             match = pattern.search(line)
             if not match:
@@ -327,8 +371,8 @@ def _extract_date(lines: tuple[str, ...]) -> str | None:
                 )
             except ValueError:
                 continue
-            return measured_at.isoformat()
-    return None
+            dates.add(measured_at.isoformat())
+    return next(iter(dates)) if len(dates) == 1 else None
 
 
 def _extract_hospital(lines: tuple[str, ...]) -> str | None:
@@ -450,13 +494,43 @@ def _table_columns(cells: list[str]) -> dict[str, int] | None:
         "unit": {"단위"},
         "status": {"기관판정", "판정"},
     }
-    columns = {
-        key: index
-        for key, names in labels.items()
-        for index, cell in enumerate(cells)
-        if _normalize(cell) in names
-    }
-    return columns if "name" in columns and "value" in columns else None
+    normalized = [_normalize(cell) for cell in cells]
+    if not any(cell in labels["name"] for cell in normalized):
+        return None
+    columns = {}
+    for key, names in labels.items():
+        matches = [i for i, cell in enumerate(normalized) if cell in names]
+        if len(matches) > 1:
+            return {}
+        if matches:
+            columns[key] = matches[0]
+    current = [i for i, cell in enumerate(normalized) if cell in {
+        "금회결과", "금회검사결과", "현재결과", "이번결과", "currentresult",
+    }]
+    comparison = any(re.search(r"과거|이전|previous", cell) for cell in normalized)
+    if len(current) == 1:
+        columns["value"] = current[0]
+    elif len(current) > 1 or comparison:
+        return {}
+    return columns if "name" in columns and "value" in columns else {}
+
+
+def _section_boundary(line: str) -> bool | None:
+    """명시적인 영역 제목만 인식한다. 기관별 전체 페이지를 일괄 제외하지 않는다. 작성자: 김진우."""
+    label = _normalize(line)
+    if label in {
+        "종합소견", "건강검진종합소견", "주요결과", "최근5년간주요검사항목",
+        "내시경검사", "위내시경검사", "조직검사", "초음파검사", "ct검사", "mri검사",
+    }:
+        return True
+    if label in {
+        "신체계측검사", "신체계측및기초검사", "기초및신체계측", "혈액검사",
+        "혈액질환검사", "간기능검사", "신장기능검사", "당뇨병검사", "소변검사",
+        "요화학검사", "흉부엑스선검사", "심혈관및이상지질혈증검사",
+        "일반건강검진결과통보서",
+    }:
+        return False
+    return None
 
 
 def _table_item(cells, columns, source_page):

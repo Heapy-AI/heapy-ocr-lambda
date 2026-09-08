@@ -4,6 +4,13 @@
 - 작성일: 2026-09-08
 - 범위: 실제 검사 결과와 안내·분류·문진을 구분하고 의미에 맞는 마스터 코드에 연결
 
+배포 결과: [Actions 34191536397](https://github.com/Heapy-AI/heapy-ocr-lambda/actions/runs/34191536397)
+성공. 커밋 `feac10945182a4cd1474fd0d9e88606d10296fad`, Worker·Janitor live 버전 `5`.
+2026-09-08 14:43:36 한국시간에 별칭 전환 후 스모크 성공을 확인했다.
+이미지 digest는 `sha256:cdd607172ec54a50b049944f7d25f7cd2eb4f6edf3473ad4f83ee88753a700ff`다.
+GitHub 테스트 116개·정적 검사·Linux 빌드·합성 PDF 변환 및 배포 후 스모크가 성공했다.
+이 결과는 실제 원본 PDF의 인식 품질·검수 저장까지 검증했다는 의미는 아니다.
+
 ## 1. 배포 코드 및 원본 확인
 
 작업 시작 시 로컬 HEAD는 `ec6a8a11ea5373224badfdf2971dd7c31c690c29`이며 미커밋 변경은 없었다.

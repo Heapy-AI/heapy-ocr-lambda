@@ -42,6 +42,8 @@ _RESPONSE_SCHEMA = {
                             "summary",
                             "risk",
                             "cancer",
+                            "advanced",
+                            "trend",
                             "unknown",
                         ],
                     },
@@ -63,6 +65,10 @@ _RESPONSE_SCHEMA = {
                         "enum": ["result", "reference", "target", "unknown"],
                     },
                     "performed": {"type": ["boolean", "null"]},
+                    "result_period": {
+                        "type": "string",
+                        "enum": ["current", "previous", "unknown"],
+                    },
                     "component_order": {
                         "type": ["string", "null"],
                         "enum": ["systolic_diastolic", "diastolic_systolic", None],
@@ -78,6 +84,7 @@ _RESPONSE_SCHEMA = {
                     "row_kind",
                     "value_origin",
                     "performed",
+                    "result_period",
                     "component_order",
                 ],
             },

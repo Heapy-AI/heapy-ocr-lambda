@@ -7,6 +7,11 @@
 
 ## 1. 확인한 기준 문서와 우선순위
 
+2026-09-08 최신: 검사 항목 정제 수정 `feac109`를 배포했다. Actions 34191536397 성공,
+Worker·Janitor live 버전 5다. 테스트 116개와 배포 후 스모크 통과. API 필드·DB·정리 계약은
+유지하며 원본의 실제 재검수는 대기 중이다. 분석·지원 범위·충돌 값 및 일반 청력 협업 사항은
+`OCR_검사항목_정제_인계.md`를 참조한다. 이하 이전 버전 기록은 이력이다.
+
 최신 배포: [Actions 34178191058](https://github.com/Heapy-AI/heapy-ocr-lambda/actions/runs/34178191058)
 성공. 커밋 `bda032bdf78a89893f01613d88f628591c33ffa2`, 이미지 digest
 `sha256:67e1bdfa2f1850e241dbd7ce2ed93efccae670ec34420b685109931ef56e65c7`이다.

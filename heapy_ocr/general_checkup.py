@@ -7,8 +7,18 @@ from dataclasses import replace
 from heapy_ocr.models import RawCheckupItem
 
 GENERAL_INSTRUCTIONS = (
-    "일반건강검진 결과통보서의 현재 검사 결과만 추출하세요. "
-    "별도 암검진 결과통보서, 내시경·조직진단·종합검진 상세 보고서는 제외하세요. "
+    "일반건강검진 통보서와 기관별 종합검진 보고서에서 이번 검사의 공통 검사 결과를 추출하세요. "
+    "문서 디자인이나 종합검진이라는 제목만으로 제외하지 마세요. "
+    "신체계측·혈압·시력·청력·혈액·소변 검사와 흉부 X선의 기재된 결과가 대상입니다. "
+    "별도 암검진, 내시경·조직진단·초음파·CT·MRI 상세 소견은 advanced 섹션으로 제외하세요. "
+    "한 페이지에 공통 검사와 상세 소견이 섞이면 표·영역 단위로 구분하세요. "
+    "현재/금회/이번 결과 열만 읽고 이전/과거 결과 열은 읽지 마세요. "
+    "이전 결과 열이 왼쪽일 수도 있습니다. 위치나 가장 큰 숫자로 현재 결과를 선택하지 마세요. "
+    "현재 결과가 비어 있으면 과거 결과로 채우지 마세요. 연도별 그래프·추세 요약은 제외하세요. "
+    "비교표의 머리글이 병합되거나 여러 줄이어도 금회 결과의 하위 결과·단위·판정을 연결하세요. "
+    "비교표에서 현재 열을 확인할 수 없으면 해당 값을 추출하지 마세요. "
+    "반복된 결과는 같은 검사의 이번 결과만 추출하고 서로 다르면 그대로 남기세요. "
+    "혈당/Glucose만 적혀 있으면 공복 상태를 추정하지 마세요. "
     "심뇌혈관질환 위험평가 페이지의 목표값·평균값·개선 예상값·중복 측정값은 items에 넣지 마세요. "
     "키와 몸무게, 수축기와 이완기 혈압, 시력의 좌우는 인쇄된 순서와 표기를 확인해 각각 분리하세요. "
     "청력의 정상/정상은 청력(좌), 청력(우)의 정성 결과이며 주파수·dB 수치를 추정하지 마세요. "
@@ -39,12 +49,13 @@ GENERAL_INSTRUCTIONS = (
     "기관 판정 셀이 여러 검사에 걸쳐 병합된 경우 원문상 해당 행에 적용되는 판정만 보존하세요. "
     "혈압의 수축기/이완기 순서가 원문에서 확인되면 component_order=systolic_diastolic, "
     "반대 순서는 diastolic_systolic, 불명확하면 null입니다. "
-    "일반검진 결과가 없는 페이지 묶음은 items를 빈 배열로 반환하세요. "
+    "지원하는 공통 검사 결과가 없는 페이지 묶음은 items를 빈 배열로 반환하세요. "
     "출력은 measured_at, hospital_name, items만 포함하는 JSON입니다. "
     "각 항목은 raw_name, raw_value, raw_unit, printed_status, source_page와 "
-    "section(general_results/questionnaire/summary/risk/cancer/unknown), "
+    "section(general_results/questionnaire/summary/risk/cancer/advanced/trend/unknown), "
     "row_kind(measurement/qualitative/assessment/heading/guidance/history/lifestyle/unknown), "
     "value_origin(result/reference/target/unknown), performed(true/false/null), "
+    "result_period(current/previous/unknown: 이번 결과인지), "
     "component_order(systolic_diastolic/diastolic_systolic/null)를 포함합니다. "
     "원문 표의 일반 검사·실시된 평가 결과만 items에 넣으세요."
 )
@@ -110,7 +121,9 @@ def result_items(item: RawCheckupItem, context: dict | None = None) -> tuple[Raw
         and context.get("value_origin") == "result"
     ):
         item = replace(item, raw_name="생활습관평가")
-    if context.get("section") in ("summary", "risk", "cancer"):
+    if context.get("section") in ("summary", "risk", "cancer", "advanced", "trend"):
+        return ()
+    if "result_period" in context and context["result_period"] != "current":
         return ()
     if context.get("row_kind") in ("heading", "guidance", "history", "lifestyle"):
         return ()

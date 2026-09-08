@@ -223,14 +223,7 @@ class HeapyOcrService:
         else:
             parser_mode = "gemini_with_rule_fallback"
         return CheckupExtraction(
-            measured_at=next(
-                (
-                    extraction.measured_at
-                    for extraction in extractions
-                    if extraction.measured_at
-                ),
-                None,
-            ),
+            measured_at=_single_measured_at(extractions),
             hospital_name=next(
                 (
                     extraction.hospital_name
@@ -262,6 +255,12 @@ def _deduplicate_items(
                repr(sorted(item.detail_data.items())))
         unique.setdefault(key, item)
     return tuple(unique.values())
+
+
+def _single_measured_at(extractions: list[CheckupExtraction]) -> str | None:
+    """페이지별 검진일이 충돌하면 첫 날짜를 임의로 확정하지 않는다. 작성자: 김진우."""
+    dates = {item.measured_at for item in extractions if item.measured_at}
+    return next(iter(dates)) if len(dates) == 1 else None
 
 
 def _merged_document_type(extractions: list[CheckupExtraction]) -> str:
