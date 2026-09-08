@@ -15,7 +15,7 @@ from typing import Any
 
 from heapy_ocr.diagnostics import mark_status, observe
 from heapy_ocr.exceptions import ExternalServiceError
-from heapy_ocr.general_checkup import GENERAL_INSTRUCTIONS, general_lines
+from heapy_ocr.general_checkup import GENERAL_INSTRUCTIONS, general_lines, result_items
 from heapy_ocr.models import CheckupSummary, RawCheckupItem
 from heapy_ocr.rule_parser import CheckupExtraction
 
@@ -34,8 +34,52 @@ _RESPONSE_SCHEMA = {
                     "raw_unit": {"type": ["string", "null"]},
                     "printed_status": {"type": ["string", "null"]},
                     "source_page": {"type": ["integer", "null"]},
+                    "section": {
+                        "type": "string",
+                        "enum": [
+                            "general_results",
+                            "questionnaire",
+                            "summary",
+                            "risk",
+                            "cancer",
+                            "unknown",
+                        ],
+                    },
+                    "row_kind": {
+                        "type": "string",
+                        "enum": [
+                            "measurement",
+                            "qualitative",
+                            "assessment",
+                            "heading",
+                            "guidance",
+                            "history",
+                            "lifestyle",
+                            "unknown",
+                        ],
+                    },
+                    "value_origin": {
+                        "type": "string",
+                        "enum": ["result", "reference", "target", "unknown"],
+                    },
+                    "performed": {"type": ["boolean", "null"]},
+                    "component_order": {
+                        "type": ["string", "null"],
+                        "enum": ["systolic_diastolic", "diastolic_systolic", None],
+                    },
                 },
-                "required": ["raw_name", "raw_value", "raw_unit", "printed_status", "source_page"],
+                "required": [
+                    "raw_name",
+                    "raw_value",
+                    "raw_unit",
+                    "printed_status",
+                    "source_page",
+                    "section",
+                    "row_kind",
+                    "value_origin",
+                    "performed",
+                    "component_order",
+                ],
             },
         },
     },
@@ -92,8 +136,7 @@ class GeminiCheckupParser:
         image_pages: tuple[bytes, ...] = (),
     ) -> Any:
         request = urllib.request.Request(
-            "https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{self.model}:generateContent",
+            f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
             data=json.dumps(
                 _request_payload(prompt, image_pages),
                 ensure_ascii=False,
@@ -145,10 +188,10 @@ class GeminiCheckupParser:
         if not isinstance(raw_items, list):
             raise ExternalServiceError("Gemini 검사 항목 형식이 올바르지 않습니다.")
         items = tuple(
-            item
+            filtered
             for raw_item in raw_items
-            if isinstance(raw_item, dict)
-            and (item := _raw_item(raw_item)) is not None
+            if isinstance(raw_item, dict) and (item := _raw_item(raw_item)) is not None
+            for filtered in result_items(item, raw_item)
         )
         return CheckupExtraction(
             measured_at=measured_at,
@@ -245,8 +288,7 @@ def _summary(value: Any) -> CheckupSummary:
                 "source_page": _positive_integer(item.get("source_page")),
             }
             for item in value.get("risk_assessments", [])
-            if isinstance(item, dict)
-            and (name := _optional_text(item.get("name"))) is not None
+            if isinstance(item, dict) and (name := _optional_text(item.get("name"))) is not None
         ),
     )
 
@@ -261,8 +303,7 @@ def _detail_data(value: Any) -> dict[str, Any]:
             "description": _optional_text(item.get("description")),
         }
         for item in value.get("findings", [])
-        if isinstance(item, dict)
-        and (name := _optional_text(item.get("name"))) is not None
+        if isinstance(item, dict) and (name := _optional_text(item.get("name"))) is not None
     ]
     detail = {
         "interpretation": _optional_text(value.get("interpretation")),

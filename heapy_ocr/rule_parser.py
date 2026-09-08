@@ -7,11 +7,11 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 
 from heapy_ocr.exceptions import OcrError
-from heapy_ocr.general_checkup import general_lines
+from heapy_ocr.general_checkup import excluded_label, general_lines, result_items
 from heapy_ocr.models import CheckupSummary, MasterCheckupItem, RawCheckupItem
 
 _DATE_PATTERNS = (
@@ -28,12 +28,11 @@ _QUALITATIVE_VALUE_PATTERN = re.compile(
     r"(?<![가-힣])(음성|양성|미실시|미검|비반응|반응|trace|negative|positive)(?![가-힣])",
     re.IGNORECASE,
 )
-_RANGE_PATTERN = re.compile(
-    r"[<>≤≥]?\s*-?\d+(?:\.\d+)?\s*(?:~|–|—|-)\s*[<>≤≥]?\s*-?\d+(?:\.\d+)?"
-)
+_RANGE_PATTERN = re.compile(r"[<>≤≥]?\s*-?\d+(?:\.\d+)?\s*(?:~|–|—|-)\s*[<>≤≥]?\s*-?\d+(?:\.\d+)?")
 _NUMBER_PATTERN = re.compile(r"(?<![\w.])(?:[<>≤≥]=?\s*)?-?\d+(?:\.\d+)?(?![\w.])")
 _UNIT_PATTERN = re.compile(
     r"(?<![A-Za-z])(?:"
+    r"mL/min/1\.73m2|kg/m2|mmHg|"
     r"(?:mg|g|ng|pg|ug|μg|mmol|mIU|uIU|IU|pmol|mL|mm|cm|kg|dB|fL|L|U)"
     r"(?:\s*/\s*(?:dL|mL|L|g|min|hr|HPF|LPF|1\.73m2))?"
     r"|%|kg/m2|10\^\d+/uL|/min|/HPF|/LPF)(?![A-Za-z])",
@@ -57,7 +56,7 @@ ITEM_CODE_ALIASES = {
     "공복시혈당": "FASTING_GLUCOSE",
     "식전혈당": "FASTING_GLUCOSE",
     "혈당식전": "FASTING_GLUCOSE",
-    "혈당": "FASTING_GLUCOSE",
+    "공복혈당": "FASTING_GLUCOSE",
     "sgot": "AST",
     "ast": "AST",
     "sgpt": "ALT",
@@ -77,6 +76,15 @@ ITEM_CODE_ALIASES = {
     "ldl콜레스테롤": "LDL_CHOLESTEROL",
     "중성지방": "TRIGLYCERIDES",
     "크레아티닌": "SERUM_CREATININE",
+    "혈청크레아티닌": "SERUM_CREATININE",
+    "신사구체여과율": "EGFR",
+    "신사구체여과율egfr": "EGFR",
+    "에이에스티ast": "AST",
+    "에이엘티alt": "ALT",
+    "감마지티피γgtp": "GAMMA_GTP",
+    "감마지티피gammagtp": "GAMMA_GTP",
+    "고밀도콜레스테롤hdl": "HDL_CHOLESTEROL",
+    "저밀도콜레스테롤ldl": "LDL_CHOLESTEROL",
     "egfr": "EGFR",
     "혈색소": "HEMOGLOBIN",
     "헤모글로빈": "HEMOGLOBIN",
@@ -129,9 +137,7 @@ class RuleBasedCheckupParser:
             for alias, item_code in ITEM_CODE_ALIASES.items()
             if item_code in self._catalog_by_code
         )
-        self._terms = tuple(
-            sorted(terms, key=lambda term: len(term.normalized), reverse=True)
-        )
+        self._terms = tuple(sorted(terms, key=lambda term: len(term.normalized), reverse=True))
 
     def parse(self, lines: tuple[str, ...]) -> CheckupExtraction:
         lines = general_lines(lines)
@@ -139,10 +145,40 @@ class RuleBasedCheckupParser:
         hospital_name = _extract_hospital(lines)
         items: list[RawCheckupItem] = []
         pending_term: _ItemTerm | None = None
+        source_page = None
+        table_columns = None
 
         for raw_line in lines:
             line = _clean_line(raw_line)
-            if not line or line.startswith("--- "):
+            marker = re.fullmatch(r"--- (\d+)페이지 ---", line)
+            if marker:
+                source_page = int(marker.group(1))
+                pending_term = None
+                table_columns = None
+                continue
+            if not line:
+                pending_term = None
+                continue
+            if "|" in line:
+                cells = [cell.strip() for cell in line.strip("|").split("|")]
+                header = _table_columns(cells)
+                if header:
+                    table_columns = header
+                elif table_columns:
+                    parsed = _table_item(cells, table_columns, source_page)
+                    if parsed:
+                        items.extend(result_items(parsed))
+                pending_term = None
+                continue
+            if (
+                excluded_label(line)
+                or re.search(r"참고치|정상범위|목표\s*(?:값|상태)|필요합니다", line)
+                or re.match(
+                    r"^(?:과거병력|과거력|약물치료|예방접종|흡연|음주|신체활동|근력운동)(?:\s|[:：])",
+                    line,
+                )
+            ):
+                pending_term = None
                 continue
             if any(marker in line for marker in ("□", "■", "☑", "☐", "▣")):
                 # 텍스트 fallback으로 체크 위치·표 열을 보장할 수 없는 행은 추정하지 않는다.
@@ -165,7 +201,10 @@ class RuleBasedCheckupParser:
                     "HEARING_1000HZ_RIGHT",
                 ),
             )
-            items.extend(compound_items)
+            items.extend(replace(item, source_page=source_page) for item in compound_items)
+            if compound_items:
+                pending_term = None
+                continue
 
             occurrences = self._find_items(line)
             if occurrences:
@@ -174,15 +213,18 @@ class RuleBasedCheckupParser:
                     end = occurrences[index + 1][0] if index + 1 < len(occurrences) else len(line)
                     parsed = self._parse_item_line(line[start:end], term)
                     if parsed is not None:
-                        items.append(parsed)
+                        items.append(replace(parsed, source_page=source_page))
                         parsed_count += 1
-                pending_term = occurrences[-1][2] if parsed_count == 0 else None
+                term = occurrences[-1][2]
+                pending_term = (
+                    term if parsed_count == 0 and _normalize(line) == term.normalized else None
+                )
                 continue
 
             if pending_term is not None:
                 parsed = self._parse_item_line(line, pending_term, name_in_line=False)
                 if parsed is not None:
-                    items.append(parsed)
+                    items.append(replace(parsed, source_page=source_page))
                 pending_term = None
 
         if not items:
@@ -193,7 +235,7 @@ class RuleBasedCheckupParser:
         return CheckupExtraction(
             measured_at=measured_at,
             hospital_name=hospital_name,
-            items=tuple(items),
+            items=tuple(filtered for item in items for filtered in result_items(item)),
         )
 
     def _find_items(self, line: str) -> tuple[tuple[int, int, _ItemTerm], ...]:
@@ -202,9 +244,7 @@ class RuleBasedCheckupParser:
             tokens = re.findall(r"[A-Za-z]+|\d+|[가-힣]+", term.text)
             if not tokens:
                 continue
-            flexible = r"[^0-9A-Za-z가-힣]*".join(
-                re.escape(token) for token in tokens
-            )
+            flexible = r"[^0-9A-Za-z가-힣]*".join(re.escape(token) for token in tokens)
             pattern = re.compile(
                 rf"(?<![0-9A-Za-z가-힣]){flexible}(?![0-9A-Za-z가-힣])",
                 re.IGNORECASE,
@@ -222,8 +262,7 @@ class RuleBasedCheckupParser:
             if term.item_code in selected_codes:
                 continue
             overlaps = any(
-                start < saved_end and end > saved_start
-                for saved_start, saved_end, _ in selected
+                start < saved_end and end > saved_start for saved_start, saved_end, _ in selected
             )
             if overlaps:
                 continue
@@ -269,7 +308,7 @@ class RuleBasedCheckupParser:
         return RawCheckupItem(
             raw_name=term.text,
             raw_value=value,
-            raw_unit=unit or master.standard_unit,
+            raw_unit=unit,
             printed_status=status,
         )
 
@@ -304,17 +343,16 @@ def _extract_hospital(lines: tuple[str, ...]) -> str | None:
 
 
 def _extract_combined_blood_pressure(line: str) -> tuple[RawCheckupItem, ...]:
-    if "혈압" not in line:
+    if "혈압" not in line or not re.search(r"mm\s*Hg", line, re.IGNORECASE):
         return ()
     match = re.search(r"(?<!\d)(\d{2,3})\s*/\s*(\d{2,3})(?!\d)", line)
     if not match:
         return ()
     status_match = _STATUS_PATTERN.search(line)
     status = _compact(status_match.group(0)) if status_match else None
-    return (
-        RawCheckupItem("수축기혈압", match.group(1), "mmHg", status),
-        RawCheckupItem("이완기혈압", match.group(2), "mmHg", status),
-    )
+    item = RawCheckupItem(line, f"{match.group(1)}/{match.group(2)}", "mmHg", status)
+    split = result_items(item)
+    return split if len(split) == 2 else ()
 
 
 def _extract_height_and_weight(line: str) -> tuple[RawCheckupItem, ...]:
@@ -327,8 +365,10 @@ def _extract_height_and_weight(line: str) -> tuple[RawCheckupItem, ...]:
     if not match:
         return ()
     return (
-        RawCheckupItem("신장", match.group(1), "cm"),
-        RawCheckupItem("체중", match.group(2), "kg"),
+        RawCheckupItem("신장", match.group(1), "cm" if re.search(r"키\s*\(?cm", line) else None),
+        RawCheckupItem(
+            "체중", match.group(2), "kg" if re.search(r"몸무게\s*\(?kg", line) else None
+        ),
     )
 
 
@@ -400,3 +440,31 @@ def _first_result_number(value: str) -> str | None:
             continue
         return match.group(0).replace(" ", "")
     return None
+
+
+def _table_columns(cells: list[str]) -> dict[str, int] | None:
+    """명시적인 구분자가 있는 합성·텍스트 표에서만 열을 연결한다. 작성자: 김진우."""
+    labels = {
+        "name": {"검사명", "검사항목"},
+        "value": {"결과", "검사결과", "실제결과"},
+        "unit": {"단위"},
+        "status": {"기관판정", "판정"},
+    }
+    columns = {
+        key: index
+        for key, names in labels.items()
+        for index, cell in enumerate(cells)
+        if _normalize(cell) in names
+    }
+    return columns if "name" in columns and "value" in columns else None
+
+
+def _table_item(cells, columns, source_page):
+    if max(columns.values()) >= len(cells):
+        return None
+    name, value = cells[columns["name"]], cells[columns["value"]]
+    if not name or not value or any(marker in " ".join(cells) for marker in ("□", "■", "☑")):
+        return None
+    unit = cells[columns["unit"]] or None if "unit" in columns else None
+    status = cells[columns["status"]] or None if "status" in columns else None
+    return RawCheckupItem(name, value, unit, status, source_page)

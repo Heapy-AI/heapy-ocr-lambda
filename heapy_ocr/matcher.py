@@ -9,6 +9,7 @@ import re
 import unicodedata
 from difflib import SequenceMatcher
 
+from heapy_ocr.general_checkup import excluded_label
 from heapy_ocr.models import MasterCheckupItem, ParsedCheckupItem, RawCheckupItem
 from heapy_ocr.rule_parser import ITEM_CODE_ALIASES
 
@@ -30,9 +31,7 @@ class CheckupItemMatcher:
 
     def __init__(self, catalog: tuple[MasterCheckupItem, ...]) -> None:
         self.catalog = catalog
-        self._normalized = {
-            item.item_code: _normalize(item.item_name) for item in catalog
-        }
+        self._normalized = {item.item_code: _normalize(item.item_name) for item in catalog}
 
     def match(
         self,
@@ -40,28 +39,50 @@ class CheckupItemMatcher:
         ocr_confidence: float,
     ) -> ParsedCheckupItem:
         query = _normalize(raw_item.raw_name)
-        if "청력" in query and "1000" not in query:
+        if excluded_label(raw_item.raw_name) or query in {
+            "혈압",
+            "혈당",
+            "우울증",
+            "인지기능장애",
+            "b형간염",
+            "c형간염",
+            "시력",
+        }:
+            return _matched_item(raw_item, None, ocr_confidence, 0.0)
+        if ("청력" in query or "hearing" in query) and (
+            "1000" not in query
+            or not re.fullmatch(r"\d+(?:\.\d+)?", raw_item.raw_value.strip())
+            or (raw_item.raw_unit is not None and _normalize(raw_item.raw_unit) != "db")
+        ):
             # 일반 청력 판정을 특정 주파수 검사 코드로 추정하지 않는다.
             return _matched_item(raw_item, None, ocr_confidence, 0.0)
-        alias_code = ITEM_CODE_ALIASES.get(query)
+        aliases = {_normalize(name): code for name, code in ITEM_CODE_ALIASES.items()}
+        alias_code = aliases.get(query)
         if alias_code is not None:
             alias_match = next(
                 (item for item in self.catalog if item.item_code == alias_code),
                 None,
             )
-            if alias_match is not None:
+            if alias_match is not None and _unit_compatible(raw_item, alias_match):
                 return _matched_item(raw_item, alias_match, ocr_confidence, 1.0)
+            return _matched_item(raw_item, None, ocr_confidence, 0.0)
         query = _ALIASES.get(query, query)
         best_item: MasterCheckupItem | None = None
         best_score = 0.0
+        second_score = 0.0
         for item in self.catalog:
+            if not _unit_compatible(raw_item, item):
+                continue
             candidate = self._normalized[item.item_code]
             score = self._score(query, candidate, item.item_code)
             if score > best_score:
+                second_score = best_score
                 best_score = score
                 best_item = item
+            else:
+                second_score = max(second_score, score)
 
-        matched = best_item if best_score >= 0.66 else None
+        matched = best_item if best_score >= 0.9 and best_score - second_score >= 0.08 else None
         return _matched_item(raw_item, matched, ocr_confidence, best_score)
 
     @staticmethod
@@ -92,6 +113,23 @@ def _normalize(value: str) -> str:
 
 def _normalize_value(value: str) -> str:
     return unicodedata.normalize("NFKC", value).strip()
+
+
+def _unit_compatible(raw: RawCheckupItem, master: MasterCheckupItem) -> bool:
+    """실제 표기 단위를 보존하며 명백히 다른 종류의 단위는 연결하지 않는다."""
+    if not raw.raw_unit or not master.standard_unit:
+        return True
+    unit = _normalize(raw.raw_unit.replace("μ", "u").replace("µ", "u"))
+    expected = _normalize(master.standard_unit)
+    alternatives = {
+        "FASTING_GLUCOSE": {"mgdl", "mmoll"},
+        "HEMOGLOBIN": {"gdl", "gl"},
+        "SERUM_CREATININE": {"mgdl", "umoll"},
+        "AST": {"ul", "iul"},
+        "ALT": {"ul", "iul"},
+        "GAMMA_GTP": {"ul", "iul"},
+    }
+    return unit == expected or unit in alternatives.get(master.item_code, set())
 
 
 def _matched_item(

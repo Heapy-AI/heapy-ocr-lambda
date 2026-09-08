@@ -13,6 +13,7 @@ from uuid import uuid4
 from heapy_ocr.catalog import MASTER_CHECKUP_ITEMS
 from heapy_ocr.exceptions import ExternalServiceError, OcrError
 from heapy_ocr.gemini import GeminiCheckupParser
+from heapy_ocr.general_checkup import result_items
 from heapy_ocr.matcher import CheckupItemMatcher
 from heapy_ocr.models import CheckupSummary, ExtractionResult, ParsedCheckupItem
 from heapy_ocr.ocr import OcrAnalyzer, OcrDocument
@@ -83,7 +84,8 @@ class HeapyOcrService:
         matcher = CheckupItemMatcher(MASTER_CHECKUP_ITEMS)
         matched_items = tuple(
             matcher.match(raw_item, 1.0)
-            for raw_item in extraction.items
+            for original in extraction.items
+            for raw_item in result_items(original)
         )
         items = _deduplicate_items(matched_items)
 
@@ -252,23 +254,14 @@ class HeapyOcrService:
 def _deduplicate_items(
     items: tuple[ParsedCheckupItem, ...],
 ) -> tuple[ParsedCheckupItem, ...]:
-    """동일 검사코드가 여러 번 인식되면 가장 신뢰도 높은 결과만 남긴다."""
-
-    unique: dict[str, ParsedCheckupItem] = {}
-    unmatched: dict[tuple[str, str, str | None], ParsedCheckupItem] = {}
+    """같은 값·단위·판정만 합친다. 충돌 값은 임의 선택하지 않는다."""
+    unique: dict[tuple, ParsedCheckupItem] = {}
     for item in items:
-        if item.item_code is None:
-            key = (item.raw_name.casefold(), item.value, item.raw_unit)
-            unmatched.setdefault(key, item)
-            continue
-        current = unique.get(item.item_code)
-        item_score = (item.confidence, bool(item.detail_data))
-        current_score = (
-            (current.confidence, bool(current.detail_data)) if current else (-1.0, False)
-        )
-        if item_score > current_score:
-            unique[item.item_code] = item
-    return tuple(unique.values()) + tuple(unmatched.values())
+        identity = item.item_code or item.raw_name.casefold()
+        key = (identity, item.value, item.raw_unit, item.printed_status,
+               repr(sorted(item.detail_data.items())))
+        unique.setdefault(key, item)
+    return tuple(unique.values())
 
 
 def _merged_document_type(extractions: list[CheckupExtraction]) -> str:
