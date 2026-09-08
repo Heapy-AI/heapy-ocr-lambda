@@ -17,6 +17,7 @@ from botocore.config import Config
 
 from heapy_ocr.contract import VERSION, ContractError, Job, response, timestamp
 from heapy_ocr.diagnostics import emit
+from heapy_ocr.review_metrics import emit_review_metrics
 from heapy_ocr.storage import Store
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,8 @@ class Worker:
         }
         try:
             self.store.cas(job.key, final, etag)
+            if code is None:
+                emit_review_metrics(logger, job.id, result)
         except ContractError as exc:
             if exc.code != "STATE_CONFLICT":
                 raise
