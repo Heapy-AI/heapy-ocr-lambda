@@ -48,7 +48,7 @@ class Settings:
             gemini_timeout_seconds=_positive_int("GEMINI_TIMEOUT_SECONDS", 60),
             gemini_pages_per_request=_bounded_int(
                 "GEMINI_PAGES_PER_REQUEST",
-                3,
+                1,
                 5,
             ),
         )
