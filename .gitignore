@@ -20,3 +20,4 @@ ocr-results/
 *.tfstate*
 *.tfvars
 !*.tfvars.example
+*.md
